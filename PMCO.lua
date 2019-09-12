@@ -107,13 +107,18 @@ function thrustIsSet()
    return iEng1_N1 > 80 and iEng2_N1 > 80
 end
 
-function play(fileName, length)
+function announce(fileName, length, ECAM)
    local currTime = ipc.elapsedtime()
+   local reactionTime = plusminus(1000)
+
    if previousCalloutTime and currTime - previousCalloutTime < previousCalloutLength then
-      ipc.sleep(previousCalloutLength - (currTime - previousCalloutTime))
+      local timeUntilPreviousEnds = (previousCalloutLength - (currTime - previousCalloutTime))
+      ipc.sleep(timeUntilPreviousEnds)
+      if ECAM then ipc.sleep(ECAM_delay + reactionTime - timeUntilPreviousEnds)
       previousCalloutTime = nil
       previousCalloutLength = nil
    end
+
    if length then
       previousCalloutTime = ipc.elapsedtime()
       previousCalloutLength = length
@@ -136,6 +141,7 @@ local callouts = {
       repeat restingLoop() until enginesRunning()
 
       if onGround() then
+
          repeat
 
             local flightControlsCheck = coroutine.create(function() self:flightControlsCheck() end)
@@ -149,6 +155,7 @@ local callouts = {
          until self:takeoff() or groundSpeed() > 70 or not enginesRunning() -- takeoff completed or aborted
 
          if not enginesRunning() then return end
+
       end
 
       repeat restingLoop() until onGround()
@@ -231,7 +238,7 @@ local callouts = {
       if (iALT < 10.0) and thrustIsSet() then
          bThrustSet = true
          ipc.sleep(800) -- wait for further spool up
-         play("thrustSet") -- play "thrust set" callout
+         announce("thrustSet") -- play "thrust set" callout
          log("thrust set")
       elseif (iIAS > 80.0) then  -- skip criterium
          bSkipThis = true
@@ -248,7 +255,7 @@ local callouts = {
       if (iALT < 10.0 and iIAS >= 100.0) then
          b100kts = true
          ipc.sleep(PFD_delay)
-         play("100knots") -- play "100 kts" callout
+         announce("100knots") -- play "100 kts" callout
          log("reached 100 kts")
       end
       return b100kts
@@ -262,7 +269,7 @@ local callouts = {
       if (iALT < 10.0 and iIAS >= iV1Select) then
          bV1 = true
          ipc.sleep(PFD_delay)
-         play("v1", 900) -- play "V1" callout
+         announce("v1", 900) -- play "V1" callout
          log("reached V1")
       end
       return bV1
@@ -276,7 +283,7 @@ local callouts = {
       if (iALT < 10.0 and iIAS >= iVrSelect) then
          bVr = true
          ipc.sleep(PFD_delay)
-         play("rotate") -- play "Vr" callout
+         announce("rotate") -- play "Vr" callout
          log("reached Vr")
       end
    return bVr
@@ -289,7 +296,7 @@ local callouts = {
       -- ipc.display("waiting for positive rate of climb.\nALT = " .. iALT .. "\nV/S = " .. iVertSpeed) -- debug
       if (iALT >= 10.0 and iVertSpeed >= 500) then
          bPositiveClimb = true
-         play("positiveClimb") -- play "positive rate" callout
+         announce("positiveClimb") -- play "positive rate" callout
          log("reached positive climb")
       elseif (iALT > 150.0) then -- skip criterium: 150m / 500ft
          bSkipThis = true
@@ -308,10 +315,9 @@ local callouts = {
       -- ipc.display("waiting for spoilers deployed.\nALT = " .. iALT .. "\nSpoiler L = " .. iSpoiler_L .."\nSpoiler R = " .. iSpoiler_R) -- debug
       if (iALT < 15.0) and iSpoiler_L_deployed and iSpoiler_L_deployed then
          ipc.sleep(ECAM_delay)
-         ipc.sleep(plusminus(1000))
          bSpoilersDeployed = true
          log("spoilers deployed")
-         play("spoilers") -- play "spoilers" callout
+         announce("spoilers", 900, 1) -- play "spoilers" callout
       elseif ((groundSpeed() <= 100.0) or ((iReverser_L >= reverserDoorThreshold) and (iReverser_R >= reverserDoorThreshold))) then -- skip criterium
          bSkipThis = true
          log("skipped spoilers deployed")
@@ -329,7 +335,7 @@ local callouts = {
          log("detected reverse green")
          ipc.sleep(ECAM_delay)
          ipc.sleep(plusminus(1000))
-         play("reverseGreen") -- play "reverse green" callout
+         announce("reverseGreen") -- play "reverse green" callout
       elseif (groundSpeed() <= 90.0) then -- skip criterium
          bSkipThis = true
          log("skipped reverse green")
@@ -344,7 +350,7 @@ local callouts = {
       if (iAccelLateral < -4.0) then
          bDecel = true
          log("detected deceleration")
-         play("decel") -- play "decel" callout
+         announce("decel") -- play "decel" callout
       elseif (groundSpeed() <= 80.0) then -- skip criterium
          bSkipThis = true
          log("not enough deceleration -> skipped callout")
@@ -357,43 +363,44 @@ local callouts = {
       -- ipc.display("waiting for 70 kts.\nGS = " .. iGS) -- debug
       if (groundSpeed() <= 70.0) then
          b70kts = true
-         play("70knots") -- play "70 kts" callout
+         announce("70knots") -- play "70 kts" callout
          log("reached 70 kts")
       end
       return b70kts
    end,
-}
 
-function callouts:brakeCheck()
+   brakeCheck = function(self)
 
-   sound.path(sound_path)
+      if PM_announces_brake_check == 0 then return end
+      sound.path(sound_path)
 
-   repeat
+      repeat
 
-      if thrustLeversSetForTakeoff() then return end
+         if thrustLeversSetForTakeoff() then return end
 
-      local leftBrakeApp = ipc.readUW(0x0BC4) * 100 / 16383
-      local rightBrakeApp = ipc.readUW(0x0BC6) * 100 / 16383
-      local leftPressure = ipc.readLvar("VC_MIP_BrkPress_L")
-      local rightPressure = ipc.readLvar("VC_MIP_BrkPress_R")
-      local pushback = ipc.readLvar("FSLA320_NWS_Pin") == 1
+         local leftBrakeApp = ipc.readUW(0x0BC4) * 100 / 16383
+         local rightBrakeApp = ipc.readUW(0x0BC6) * 100 / 16383
+         local leftPressure = ipc.readLvar("VC_MIP_BrkPress_L")
+         local rightPressure = ipc.readLvar("VC_MIP_BrkPress_R")
+         local pushback = ipc.readLvar("FSLA320_NWS_Pin") == 1
 
-      if not pushback and groundSpeed() > 1 and leftBrakeApp > 0 and rightBrakeApp > 0 then
-         ipc.sleep(500)
-         if leftBrakeApp > 0 and rightBrakeApp > 0 and leftPressure == 0 and rightPressure == 0 then
-            play("pressureZero")
-            brakesChecked = true
+         if not pushback and groundSpeed() > 1 and leftBrakeApp > 0 and rightBrakeApp > 0 then
+            ipc.sleep(500)
+            if leftBrakeApp > 0 and rightBrakeApp > 0 and leftPressure == 0 and rightPressure == 0 then
+               announce("pressureZero")
+               brakesChecked = true
+            end
          end
-      end
 
-      coroutine.yield()
-      
-   until brakesChecked
+         coroutine.yield()
+         
+      until brakesChecked
 
-   ipc.set("brakesChecked",1)
-   self.brakesChecked = true
+      ipc.set("brakesChecked",1)
+      self.brakesChecked = true
 
-end
+   end
+}
 
 callouts.flightControlsCheck = {
 
@@ -404,6 +411,7 @@ callouts.flightControlsCheck = {
 
    __call = function(self)
 
+      if PM_announces_flightcontrol_check == 0 then return end
       local fullLeft, fullRight, fullLeftRud, fullRightRud, fullUp, fullDown, xNeutral, yNeutral, rudNeutral
       sound.path(sound_path)
       
@@ -415,7 +423,7 @@ callouts.flightControlsCheck = {
          if not fullLeft and not (((fullLeftRud or fullRightRud) and not rudNeutral) or ((fullUp or fullDown) and not yNeutral)) and self:fullLeft() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
-            play("fullLeft1")
+            announce("fullLeft1")
             fullLeft = true
          end
 
@@ -423,7 +431,7 @@ callouts.flightControlsCheck = {
          if not fullRight and not (((fullLeftRud or fullRightRud) and not rudNeutral) or ((fullUp or fullDown) and not yNeutral)) and self:fullRight() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
-            play("fullRight1")
+            announce("fullRight1")
             fullRight = true
          end
 
@@ -431,7 +439,7 @@ callouts.flightControlsCheck = {
          if not fullUp and not (((fullLeftRud or fullRightRud) and not rudNeutral) or ((fullLeft or fullRight) and not xNeutral)) and self:fullUp() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
-            play("fullUp")
+            announce("fullUp")
             fullUp = true
          end
 
@@ -439,7 +447,7 @@ callouts.flightControlsCheck = {
          if not fullDown and not (((fullLeftRud or fullRightRud) and not rudNeutral) or ((fullLeft or fullRight) and not xNeutral)) and self:fullDown() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
-            play("fullDown")
+            announce("fullDown")
             fullDown = true
          end
 
@@ -447,7 +455,7 @@ callouts.flightControlsCheck = {
          if not fullLeftRud and not (((fullLeft or fullRight) and not xNeutral) or ((fullUp or fullDown) and not yNeutral)) and self:fullLeftRud() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
-            play("fullLeft2")
+            announce("fullLeft2")
             fullLeftRud = true
          end
 
@@ -455,7 +463,7 @@ callouts.flightControlsCheck = {
          if not fullRightRud and not (((fullLeft or fullRight) and not xNeutral) or ((fullUp or fullDown) and not yNeutral)) and self:fullRightRud() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
-            play("fullRight2")
+            announce("fullRight2")
             fullRightRud = true
          end
 
@@ -463,7 +471,7 @@ callouts.flightControlsCheck = {
          if fullLeft and fullRight and not xNeutral and self:stickNeutral() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
-            play("neutral1")
+            announce("neutral1")
             xNeutral = true
          end
 
@@ -471,7 +479,7 @@ callouts.flightControlsCheck = {
          if fullUp and fullDown and not yNeutral and self:stickNeutral() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
-            play("neutral2")
+            announce("neutral2")
             yNeutral = true
          end
 
@@ -479,7 +487,7 @@ callouts.flightControlsCheck = {
          if fullLeftRud and fullRightRud and not rudNeutral and self:rudNeutral() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
-            play("neutral3")
+            announce("neutral3")
             rudNeutral = true
          end
 
