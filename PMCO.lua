@@ -15,7 +15,7 @@ displayStartupMessage = 1 -- show script startup message 0 = no, 1 = yes
 soundDevice = 0 -- zero is default (only change this, when no sound is played)
 volume = 65 -- volume of all callouts (zero does NOT mean silenced, just rather quiet)
 PM_announces_flightcontrol_check = 1 -- PM calls out 'full left', 'full right' etc.
-PM_announces_brake_check = 1 -- PM calls out 'brake pressure zero' after your brake check. The trigger is the first continuous application (a couple of seconds) of the brakes
+PM_announces_brake_check = 1 -- PM calls out 'brake pressure zero' after your brake check. The trigger is the first application of the brakes after you start moving
 
 -- Actions:
 
@@ -25,12 +25,14 @@ SOP = "default"
 -- Enable or disable individual procedures in the 'default' SOP and change their related options:
 
 after_start = 1 -- triggered when at least one engine is running and the engine mode selector is in the 'NORM' position
+during_taxi = 1 -- the PM will press the AUTO BRK and TO CONFIG buttons after you've done the brake and flight controls checks
 lineup = 1 -- triggered by cycling the seat belts sign switch twice within 2 seconds
 after_takeoff = 1 -- triggered by moving the thrust levers into the 'CLB' detent
 after_landing = 1 -- triggered when the ground speed is less than 30 kts and you have disarmed the spoilers
 
 packs_on_takeoff = 0 -- 0 = takeoff with packs OFF. This option will be ignored if a performance request is found in the ATSU log
 pack2_off_after_landing = 0
+
 
 -- ##################################################################
 -- ############### END OF USER OPTIONS ##############################
@@ -51,8 +53,7 @@ local TL_takeoffThreshold = 26
 local TL_reverseThreshold = 100
 local reverserDoorThreshold = 90
 local spoilerThreshold = 200
-local previousCalloutTime
-local previousCalloutLength
+local previousCallout
 
 -- Logging ------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
@@ -107,23 +108,16 @@ function thrustIsSet()
    return iEng1_N1 > 80 and iEng2_N1 > 80
 end
 
-function announce(fileName, length, ECAM)
-   local currTime = ipc.elapsedtime()
-   local reactionTime = plusminus(1000)
+function announce(fileName, ECAM)
 
-   if previousCalloutTime and currTime - previousCalloutTime < previousCalloutLength then
-      local timeUntilPreviousEnds = (previousCalloutLength - (currTime - previousCalloutTime))
-      ipc.sleep(timeUntilPreviousEnds)
-      if ECAM then ipc.sleep(ECAM_delay + reactionTime - timeUntilPreviousEnds)
-      previousCalloutTime = nil
-      previousCalloutLength = nil
-   end
+   local reactionTime = 750
 
-   if length then
-      previousCalloutTime = ipc.elapsedtime()
-      previousCalloutLength = length
-   end
-   sound.play(fileName, soundDevice, vol) 
+   if ECAM then ipc.sleep(ECAM_delay + reactionTime) else ipc.sleep(PFD_delay) end
+
+   repeat ipc.sleep(50) until not sound.query(previousCallout)
+
+   previousCallout = sound.play(fileName,soundDevice,volume)
+
 end
 
 local callouts = {
@@ -254,7 +248,6 @@ local callouts = {
       -- ipc.display("waiting for 100 kts.\nIAS = " .. iIAS .. "\nALT = " .. iALT) -- debug
       if (iALT < 10.0 and iIAS >= 100.0) then
          b100kts = true
-         ipc.sleep(PFD_delay)
          announce("100knots") -- play "100 kts" callout
          log("reached 100 kts")
       end
@@ -268,7 +261,6 @@ local callouts = {
       -- ipc.display("waiting for V1 = " .. sVrSelect .. "\nIAS = " .. iIAS .. "\nALT = " .. iALT) -- debug
       if (iALT < 10.0 and iIAS >= iV1Select) then
          bV1 = true
-         ipc.sleep(PFD_delay)
          announce("v1", 900) -- play "V1" callout
          log("reached V1")
       end
@@ -282,7 +274,6 @@ local callouts = {
       -- ipc.display("waiting for Vr = " .. sVrSelect .. "\nIAS = " .. iIAS .. "\nALT = " .. iALT) -- debug
       if (iALT < 10.0 and iIAS >= iVrSelect) then
          bVr = true
-         ipc.sleep(PFD_delay)
          announce("rotate") -- play "Vr" callout
          log("reached Vr")
       end
@@ -314,7 +305,6 @@ local callouts = {
       local iReverser_R = ipc.readLvar("FSLA320_reverser_right")
       -- ipc.display("waiting for spoilers deployed.\nALT = " .. iALT .. "\nSpoiler L = " .. iSpoiler_L .."\nSpoiler R = " .. iSpoiler_R) -- debug
       if (iALT < 15.0) and iSpoiler_L_deployed and iSpoiler_L_deployed then
-         ipc.sleep(ECAM_delay)
          bSpoilersDeployed = true
          log("spoilers deployed")
          announce("spoilers", 900, 1) -- play "spoilers" callout
@@ -333,9 +323,7 @@ local callouts = {
       if ((iReverser_L >= reverserDoorThreshold) and (iReverser_R >= reverserDoorThreshold)) then
          bReversersActive = true
          log("detected reverse green")
-         ipc.sleep(ECAM_delay)
-         ipc.sleep(plusminus(1000))
-         announce("reverseGreen") -- play "reverse green" callout
+         announce("reverseGreen",1) -- play "reverse green" callout
       elseif (groundSpeed() <= 90.0) then -- skip criterium
          bSkipThis = true
          log("skipped reverse green")
@@ -350,7 +338,7 @@ local callouts = {
       if (iAccelLateral < -4.0) then
          bDecel = true
          log("detected deceleration")
-         announce("decel") -- play "decel" callout
+         announce("decel",1) -- play "decel" callout
       elseif (groundSpeed() <= 80.0) then -- skip criterium
          bSkipThis = true
          log("not enough deceleration -> skipped callout")
