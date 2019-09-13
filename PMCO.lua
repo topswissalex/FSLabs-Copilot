@@ -8,11 +8,11 @@
 
 -- Callouts:
 
-pV1 = 1 -- play V1 sound? 0 = no, 1 = yes
+play_V1 = 1 -- play V1 sound? 0 = no, 1 = yes
 V1_timing = 0 --V1 will be announced at the speed of V1 - V1_timing. If you want V1 to be announced slightly before V1 is reached on the PFD, enter the number of kts.
 PM = 2 -- Pilot Monitoring: 1 = Captain, 2 = First Officer
-displayStartupMessage = 1 -- show script startup message 0 = no, 1 = yes
-soundDevice = 0 -- zero is default (only change this, when no sound is played)
+display_startup_message = 1 -- show script startup message 0 = no, 1 = yes
+sound_device = 0 -- zero is default (only change this, when no sound is played)
 volume = 65 -- volume of all callouts (zero does NOT mean silenced, just rather quiet)
 PM_announces_flightcontrol_check = 1 -- PM calls out 'full left', 'full right' etc.
 PM_announces_brake_check = 1 -- PM calls out 'brake pressure zero' after your brake check. The trigger is the first application of the brakes after you start moving
@@ -33,13 +33,11 @@ after_landing = 1 -- triggered when the ground speed is less than 30 kts and you
 packs_on_takeoff = 0 -- 0 = takeoff with packs OFF. This option will be ignored if a performance request is found in the ATSU log
 pack2_off_after_landing = 0
 
-
 -- ##################################################################
 -- ############### END OF USER OPTIONS ##############################
 -- ##################################################################
 
-
--- Don't edit anything below this line --------------------------------------------------
+-- Don't edit below this line unless you're some kind of hacker or something ------------
 -----------------------------------------------------------------------------------------
 
 pilot = PM
@@ -90,6 +88,7 @@ function restingLoop() ipc.sleep(loopCycleResting) end
 function criticalLoop() ipc.sleep(loopCycleCritical) end
 function onGround() return ipc.readUB(0x0366) == 1 end
 function groundSpeed() return ipc.readUD(0x02B4) / 65536 * 3600 / 1852 end
+function timePassedSince(ref) return ipc.elapsedtime() - ref end
 
 function thrustLeversSetForTakeoff()
    local TL1, TL2 = ipc.readLvar("VC_PED_TL_1"), ipc.readLvar("VC_PED_TL_2")
@@ -97,15 +96,15 @@ function thrustLeversSetForTakeoff()
 end
 
 function enginesRunning()
-   local iEng1_N1 = ipc.readUW(0x0898) * 100 / 16384
-   local iEng2_N1 = ipc.readUW(0x0930) * 100 / 16384
-   return iEng1_N1 > 15 and iEng2_N1 > 15
+   local eng1_N1 = ipc.readUW(0x0898) * 100 / 16384
+   local eng2_N1 = ipc.readUW(0x0930) * 100 / 16384
+   return eng1_N1 > 15 and eng2_N1 > 15
 end
 
 function thrustIsSet()
-   local iEng1_N1 = ipc.readUW(0x0898) * 100 / 16384
-   local iEng2_N1 = ipc.readUW(0x0930) * 100 / 16384
-   return iEng1_N1 > 80 and iEng2_N1 > 80
+   local eng1_N1 = ipc.readUW(0x0898) * 100 / 16384
+   local eng2_N1 = ipc.readUW(0x0930) * 100 / 16384
+   return eng1_N1 > 80 and eng2_N1 > 80
 end
 
 function announce(fileName)
@@ -116,14 +115,15 @@ function announce(fileName)
        ipc.sleep(PFD_delay) 
    end
    repeat ipc.sleep(50) until not sound.query(previousCallout)
-   previousCallout = sound.play(fileName,soundDevice,volume)
+   previousCallout = sound.play(fileName,sound_device,volume)
 end
-
-function timePassedSince(ref) return ipc.elapsedtime() - ref end
 
 local callouts = {
 
    init = function(self)
+      self.airborne = not onGround()
+      self.cancelCountDownStart = nil
+      self.landedAtTime = nil
       self.takeoffAbortedAtTime = nil
       self.brakesChecked = false
       self.flightControlsChecked = false
@@ -131,25 +131,26 @@ local callouts = {
       ipc.set("brakesChecked", nil)
    end,
 
-   __call = function(self) -- main callouts logic
+   __call = function(self) -- main logic
 
       self:init()
+
       repeat
          if not enginesRunning() then self.skipChecks = false end
          restingLoop()
-      until enginesRunning()
+      until not enginesRunning() or thrustLeversSetForTakeoff()
 
       if onGround() and not self.skipChecks then
          local flightControlsCheck = coroutine.create(function() self:flightControlsCheck() end)
          local brakeCheck = coroutine.create(function() self:brakeCheck() end)
-         repeat
-            local flightControlsCheckedOrSkipped = self.flightControlsChecked or not coroutine.resume(flightControlsCheck)
-            local brakesCheckedOrSkipped = self.brakesChecked or not coroutine.resume(brakeCheck)
-         until flightControlsCheckedOrSkipped and brakesCheckedOrSkipped
+         repeat ipc.sleep(5)
+         until not coroutine.resume(flightControlsCheck) and not coroutine.resume(brakeCheck)
       end
 
       if onGround() then 
-         repeat restingLoop()
+         repeat 
+            if not self:takeoff() and not self.takeoffAbortedAtTime then return end
+            restingLoop()
          until self:takeoff() or self.takeoffAbortedAtTime or not enginesRunning()
       end
 
@@ -171,7 +172,7 @@ local callouts = {
    takeoffCancelled = function (self)
       local waitUntilCancel = 10000
       if not thrustLeversSetForTakeoff() then
-         if groundSpeed() > 70 and (FSL.getThrustLeversPos == "IDLE" or FSL.getThrustLeversPos == "REV_IDLE" or FSL.getThrustLeversPos == "REV_MAX") then
+         if groundSpeed() > 70 and (FSL.getThrustLeversPos() == "IDLE" or FSL.getThrustLeversPos() == "REV_IDLE" or FSL.getThrustLeversPos() == "REV_MAX") then
             self.takeoffAbortedAtTime = ipc.elapsedtime()
             return true 
          end
@@ -209,7 +210,7 @@ local callouts = {
          criticalLoop()
       until self:oneHundred()
 
-      if pV1 == 1 then
+      if play_V1 == 1 then
          repeat
             if self:takeoffCancelled() then return false end
             criticalLoop()
@@ -254,7 +255,7 @@ local callouts = {
    end,
 
    oneHundred = function(self)
-      local 100kts
+      local oneHundred
       local ALT = ipc.readUD(0x31e4)/65536
       local IAS = ipc.readUW(0x02bc)/128
       if (ALT < 10.0 and IAS >= 100.0) then
@@ -262,7 +263,7 @@ local callouts = {
          announce("100knots")
          log("reached 100 kts")
       end
-      return 100kts
+      return oneHundred
    end,
 
    V1 = function(self,V1Select)
@@ -278,15 +279,15 @@ local callouts = {
    end,
 
    rotate = function(self,VrSelect)
-      local Vr
+      local rotate
       local ALT = ipc.readUD(0x31e4)/65536
       local IAS = ipc.readUW(0x02bc)/128
       if (ALT < 10.0 and IAS >= VrSelect) then
-         Vr = true
+         rotate = true
          announce("rotate")
          log("reached Vr")
       end
-      return Vr
+      return rotate
    end,
 
    positiveClimb = function(self)
@@ -305,14 +306,14 @@ local callouts = {
    end,
 
    spoilers = function(self)
-      local spoilersDeployed, skipThis
+      local spoilers, skipThis
       local ALT = ipc.readUD(0x31e4)/65536
       local spoiler_L_Deployed = ipc.readLvar("FSLA320_spoiler_l_2") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_3") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_4") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_5") > spoilerThreshold
       local spoiler_R_Deployed = ipc.readLvar("FSLA320_spoiler_r_2") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_3") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_4") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_5") > spoilerThreshold
       local reverser_L = ipc.readLvar("FSLA320_reverser_left")
       local reverser_R = ipc.readLvar("FSLA320_reverser_right")
       if spoiler_L_Deployed and spoiler_L_Deployed then
-         spoilersDeployed = true
+         spoilers = true
          log("spoilers deployed")
          announce("spoilers")
       elseif groundSpeed() <= 100 or timePassedSince(self.landedAtTime or self.takeoffAbortedAtTime) > 2000 then -- skip criterium
@@ -322,22 +323,22 @@ local callouts = {
             log("skipped spoilers deployed")
          end
       end
-      return spoilersDeployed or skipThis
+      return spoilers or skipThis
    end,
 
    reverseGreen = function(self)
-      local reversersActive, skipThis
+      local reverseGreen, skipThis
       local reverser_L = ipc.readLvar("FSLA320_reverser_left")
       local reverser_R = ipc.readLvar("FSLA320_reverser_right")
       if ((reverser_L >= reverserDoorThreshold) and (reverser_R >= reverserDoorThreshold)) then
-         reversersActive = true
+         reverseGreen = true
          log("detected reverse green")
          announce("reverseGreen")
       elseif (groundSpeed() <= 90.0) then
          skipThis = true
          log("skipped reverse green")
       end
-      return bReversersActive or skipThis
+      return reverseGreen or skipThis
    end,
 
    decel = function(self)
@@ -355,13 +356,13 @@ local callouts = {
    end,
 
    seventy = function(self)
-      local 70kts
+      local seventy
       if groundSpeed() <= 70.0 then
-         70kts = true
+         seventy = true
          announce("70knots")
          log("reached 70 kts")
       end
-      return 70kts
+      return seventy
    end,
 
    brakeCheck = function(self)
@@ -379,6 +380,7 @@ local callouts = {
          local rightPressure = ipc.readLvar("VC_MIP_BrkPress_R")
          local pushback = ipc.readLvar("FSLA320_NWS_Pin") == 1
          local brakeAppThreshold = 1
+         local brakesChecked
 
          if not pushback and groundSpeed() > 0.5 and leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
             ipc.sleep(2000)
@@ -408,6 +410,7 @@ callouts.flightControlsCheck = {
    __call = function(self)
 
       if PM_announces_flightcontrol_check == 0 then return end
+
       local fullLeft, fullRight, fullLeftRud, fullRightRud, fullUp, fullDown, xNeutral, yNeutral, rudNeutral
       sound.path(sound_path)
       
@@ -596,23 +599,23 @@ end
 
 --log the plugin startup
 do
-   local pV1 = pV1
+   local play_V1 = play_V1
    local PM = PM
    if PM == 1 then
       PM = "Captain"
    else
       PM = "First Officer"
    end
-   if pV1 == 1 then
-      pV1 = "Yes"
+   if play_V1 == 1 then
+      play_V1 = "Yes"
    else
-      pV1 = "No"
+      play_V1 = "No"
    end
    log(">>>>>> script started <<<<<<")
-   log("user option 'Play V1 callout': " .. pV1)
+   log("user option 'Play V1 callout': " .. play_V1)
    log("user option 'Pilot Monitoring': " .. PM)
-   local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. pV1 .. "\n\nCallout volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM
-   if displayStartupMessage == 1 then ipc.display(msg,20) end
+   local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. play_V1 .. "\n\nCallout volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM
+   if display_startup_message == 1 then ipc.display(msg,20) end
 end
 
 --running the callouts function in an infinite loop
