@@ -11,11 +11,11 @@
 play_V1 = 1 -- play V1 sound? 0 = no, 1 = yes
 V1_timing = 0 --V1 will be announced at the speed of V1 - V1_timing. If you want V1 to be announced slightly before V1 is reached on the PFD, enter the number of kts.
 PM = 2 -- Pilot Monitoring: 1 = Captain, 2 = First Officer
-display_startup_message = 1 -- show script startup message 0 = no, 1 = yes
-sound_device = 0 -- zero is default (only change this, when no sound is played)
+display_startup_message = 1 -- show startup message? 0 = no, 1 = yes
+sound_device = 0 -- zero is default (only change this when no sound is played)
 volume = 65 -- volume of all callouts (zero does NOT mean silenced, just rather quiet)
 PM_announces_flightcontrol_check = 1 -- PM calls out 'full left', 'full right' etc.
-PM_announces_brake_check = 1 -- PM calls out 'brake pressure zero' after your brake check. The trigger is the first application of the brakes after you start moving
+PM_announces_brake_check = 1 -- PM calls out 'brake pressure zero' after the brake check. The trigger is the first application of the brakes after you start moving
 
 -- Actions:
 
@@ -41,6 +41,7 @@ pack2_off_after_landing = 0
 -----------------------------------------------------------------------------------------
 
 pilot = PM
+noPauses = true
 local FSL = require("FSL")
 
 local sound_path = "..\\Modules\\PMCO_Sounds\\" -- path to the callout sounds
@@ -133,12 +134,12 @@ local callouts = {
 
    __call = function(self) -- main logic
 
-      self:init()
+      if not self.falseTrigger then self:init() end
 
       repeat
          if not enginesRunning() then self.skipChecks = false end
          restingLoop()
-      until not enginesRunning() or thrustLeversSetForTakeoff()
+      until enginesRunning()
 
       if onGround() and not self.skipChecks then
          local flightControlsCheck = coroutine.create(function() self:flightControlsCheck() end)
@@ -149,15 +150,18 @@ local callouts = {
 
       if onGround() then 
          repeat 
-            if not self:takeoff() and not self.takeoffAbortedAtTime then return end
+            local takeoff = self:takeoff()
+            local abortedTakeoff = not takeoff and self.takeoffAbortedAtTime
+            self.falseTrigger = not takeoff and not abortedTakeoff
+            if self.falseTrigger then return end
             restingLoop()
-         until self:takeoff() or self.takeoffAbortedAtTime or not enginesRunning()
+         until takeoff or abortedTakeoff or not enginesRunning()
       end
 
       if not enginesRunning() then return end
 
       while not onGround() do
-         if not self.airborne then self.airborne = true
+         if not self.airborne then self.airborne = true end
          restingLoop()
       end
 
@@ -172,7 +176,8 @@ local callouts = {
    takeoffCancelled = function (self)
       local waitUntilCancel = 10000
       if not thrustLeversSetForTakeoff() then
-         if groundSpeed() > 70 and (FSL.getThrustLeversPos() == "IDLE" or FSL.getThrustLeversPos() == "REV_IDLE" or FSL.getThrustLeversPos() == "REV_MAX") then
+         local aborted = thrustIsSet() and groundSpeed() > 10 and (FSL.getThrustLeversPos(1) == "IDLE" and FSL.getThrustLeversPos(2) == "IDLE") or (FSL.getThrustLeversPos(1) == "REV_IDLE" and FSL.getThrustLeversPos(2) == "REV_IDLE") or (FSL.getThrustLeversPos(1) == "REV_MAX" and FSL.getThrustLeversPos(2) == "REV_MAX")
+         if aborted then
             self.takeoffAbortedAtTime = ipc.elapsedtime()
             return true 
          end
@@ -259,7 +264,7 @@ local callouts = {
       local ALT = ipc.readUD(0x31e4)/65536
       local IAS = ipc.readUW(0x02bc)/128
       if (ALT < 10.0 and IAS >= 100.0) then
-         100kts = true
+         oneHundred = true
          announce("100knots")
          log("reached 100 kts")
       end
@@ -312,17 +317,21 @@ local callouts = {
       local spoiler_R_Deployed = ipc.readLvar("FSLA320_spoiler_r_2") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_3") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_4") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_5") > spoilerThreshold
       local reverser_L = ipc.readLvar("FSLA320_reverser_left")
       local reverser_R = ipc.readLvar("FSLA320_reverser_right")
+
       if spoiler_L_Deployed and spoiler_L_Deployed then
          spoilers = true
          log("spoilers deployed")
          announce("spoilers")
-      elseif groundSpeed() <= 100 or timePassedSince(self.landedAtTime or self.takeoffAbortedAtTime) > 2000 then -- skip criterium
+
+      elseif groundSpeed() <= 100 then skipThis = true 
+      elseif timePassedSince(self.landedAtTime or self.takeoffAbortedAtTime) > 2000 then 
          ipc.sleep(1000)
          if onGround() then
             skipThis = true 
-            log("skipped spoilers deployed")
          end
       end
+      if skipThis then log("skipped spoilers deployed") end
+
       return spoilers or skipThis
    end,
 
@@ -419,7 +428,7 @@ callouts.flightControlsCheck = {
          if thrustLeversSetForTakeoff() then return end
 
          -- full left aileron
-         if not fullLeft and not (((fullLeftRud or fullRightRud) and not rudNeutral) or ((fullUp or fullDown) and not yNeutral)) and self:fullLeft() then
+         if not fullLeft and not ((fullUp or fullDown) and not yNeutral) and self:fullLeft() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
             announce("fullLeft1")
@@ -427,43 +436,11 @@ callouts.flightControlsCheck = {
          end
 
          -- full right aileron
-         if not fullRight and not (((fullLeftRud or fullRightRud) and not rudNeutral) or ((fullUp or fullDown) and not yNeutral)) and self:fullRight() then
+         if not fullRight and not ((fullUp or fullDown) and not yNeutral) and self:fullRight() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
             announce("fullRight1")
             fullRight = true
-         end
-
-         -- full up
-         if not fullUp and not (((fullLeftRud or fullRightRud) and not rudNeutral) or ((fullLeft or fullRight) and not xNeutral)) and self:fullUp() then
-            ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullUp")
-            fullUp = true
-         end
-
-         -- full down
-         if not fullDown and not (((fullLeftRud or fullRightRud) and not rudNeutral) or ((fullLeft or fullRight) and not xNeutral)) and self:fullDown() then
-            ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullDown")
-            fullDown = true
-         end
-
-         -- full left rudder
-         if not fullLeftRud and not (((fullLeft or fullRight) and not xNeutral) or ((fullUp or fullDown) and not yNeutral)) and self:fullLeftRud() then
-            ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullLeft2")
-            fullLeftRud = true
-         end
-
-         -- full right rudder
-         if not fullRightRud and not (((fullLeft or fullRight) and not xNeutral) or ((fullUp or fullDown) and not yNeutral)) and self:fullRightRud() then
-            ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullRight2")
-            fullRightRud = true
          end
 
          -- neutral after full left and full right aileron
@@ -474,12 +451,44 @@ callouts.flightControlsCheck = {
             xNeutral = true
          end
 
+         -- full up
+         if not fullUp and not ((fullLeft or fullRight) and not xNeutral) and self:fullUp() then
+            ipc.sleep(ECAM_delay)
+            ipc.sleep(plusminus(300))
+            announce("fullUp")
+            fullUp = true
+         end
+
+         -- full down
+         if not fullDown and not ((fullLeft or fullRight) and not xNeutral) and self:fullDown() then
+            ipc.sleep(ECAM_delay)
+            ipc.sleep(plusminus(300))
+            announce("fullDown")
+            fullDown = true
+         end
+
          -- neutral after full up and full down
          if fullUp and fullDown and not yNeutral and self:stickNeutral() then
             ipc.sleep(ECAM_delay)
             ipc.sleep(plusminus(300))
             announce("neutral2")
             yNeutral = true
+         end
+
+         -- full left rudder
+         if not fullLeftRud and xNeutral and yNeutral and self:fullLeftRud() then
+            ipc.sleep(ECAM_delay)
+            ipc.sleep(plusminus(300))
+            announce("fullLeft2")
+            fullLeftRud = true
+         end
+
+         -- full right rudder
+         if not fullRightRud and xNeutral and yNeutral and self:fullRightRud() then
+            ipc.sleep(ECAM_delay)
+            ipc.sleep(plusminus(300))
+            announce("fullRight2")
+            fullRightRud = true
          end
 
          -- neutral after full left and full right rudder

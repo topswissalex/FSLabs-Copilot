@@ -7,6 +7,7 @@ local FSL = {MCDU = {}}
 local rotorbrake = 66587
 local pilot = pilot
 local human = human or true
+local noPauses = noPauses or false
 if not pilot then human = false end
 local logging = true
 
@@ -16,7 +17,7 @@ local logging = true
 local logname = "Lua\\FSL\\FSL.log"
 io.open(logname,"w"):close()
 
-function log(str, drawline, notimestamp)
+function FSL_log(str, drawline, notimestamp)
    if not logging then return end
    local file = io.open(logname,"a")
    io.input(file)
@@ -215,16 +216,16 @@ function think(dist)
       if prob(0.2) then time = time + plusminus(500) end
       if prob(0.05) then time = time + plusminus(1000) end
    end
-   log("Thinking for " .. time .. " ms. Hmmm...")
+   FSL_log("Thinking for " .. time .. " ms. Hmmm...")
    ipc.sleep(time)
 end
 
 FSL.hand = {
    speed = function(dist)
-      log("Distance: " .. math.floor(dist) .. " mm")
+      FSL_log("Distance: " .. math.floor(dist) .. " mm")
       if dist < 80 then dist = 80 end
       local speed = plusminus ((5.54785 + (-218.97685 / (1 + (dist / (3.62192 * 10^-19))^0.0786721))),0.1)
-      log("Speed: " .. math.floor(speed * 1000) .. " mm/s")
+      FSL_log("Speed: " .. math.floor(speed * 1000) .. " mm/s")
       return plusminus(speed)
    end,
 
@@ -253,10 +254,10 @@ hand.pos = hand.home
 FSL.control.__index = FSL.control
 
 function FSL.control:__call(targetpos)
-   log("Position of control " .. self.var:gsub("VC_", "") .. ": x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z), 1)
-   if human then
+   FSL_log("Position of control " .. self.var:gsub("VC_", "") .. ": x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z), 1)
+   if human and not noPauses then
       local reachtime = hand:moveto(self.pos) 
-      log("Control reached in " .. math.floor(reachtime) .. " ms")
+      FSL_log("Control reached in " .. math.floor(reachtime) .. " ms")
    end   
    if not self.posn then
       if self.inc and self.dec then
@@ -267,8 +268,8 @@ function FSL.control:__call(targetpos)
          ipc.control(rotorbrake, self.tgl)
       end
       local t = plusminus(self.time or 300) - 50
-      if human then ipc.sleep(t) end
-      log("Interaction with the control took " .. t .. " ms")
+      if human and not noPauses then ipc.sleep(t) end
+      FSL_log("Interaction with the control took " .. t .. " ms")
    elseif self.posn then
       local currpos = self:getVar()
       targetpos = self.posn[targetpos:upper()]
@@ -284,8 +285,8 @@ function FSL.control:__call(targetpos)
                else ipc.control(rotorbrake, self.dec) end
             else break end
             local t = plusminus(self.time or 300)
-            if human then ipc.sleep(t) end
-            log("Interaction with the control took " .. t .. " ms")
+            if human and not noPauses then ipc.sleep(t) end
+            FSL_log("Interaction with the control took " .. t .. " ms")
          end
       end
    end
@@ -398,11 +399,11 @@ function FSL.control.CPT.trimwheel:set(CG,step)
    if CG then CG_man = true else CG = FSL.getCgFromAtsuLog() end
    if not CG then return end
    if not step then
-      if not CG_man and prob(0.1) then log("Looking for the loadsheet") ipc.sleep(plusminus(10000,0.5)) end
-      log("Setting the trim. MACTOW: " .. CG, 1)
-      log("Position of the trimwheel: x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z))
+      if not CG_man and prob(0.1) then FSL_log("Looking for the loadsheet") ipc.sleep(plusminus(10000,0.5)) end
+      FSL_log("Setting the trim. MACTOW: " .. CG, 1)
+      FSL_log("Position of the trimwheel: x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z))
       local reachtime = hand:moveto(self.pos) 
-      log("Trim wheel reached in " .. math.floor(reachtime) .. " ms")
+      FSL_log("Trim wheel reached in " .. math.floor(reachtime) .. " ms")
    end
    repeat
       local CG_ind = self:getInd()
