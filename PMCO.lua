@@ -108,16 +108,15 @@ function thrustIsSet()
    return iEng1_N1 > 80 and iEng2_N1 > 80
 end
 
-function announce(fileName, ECAM)
-
+function announce(fileName)
    local reactionTime = 750
-
-   if ECAM then ipc.sleep(ECAM_delay + reactionTime) else ipc.sleep(PFD_delay) end
-
+   if fileName == "spoilers" or fileName =="reverseGreen" or fileName == "decel" or fileName == "70knots" then
+      ipc.sleep(ECAM_delay + reactionTime)
+   elseif fileName == "100knots" or fileName == "v1" or fileName == "rotate" then
+       ipc.sleep(PFD_delay) 
+   end
    repeat ipc.sleep(50) until not sound.query(previousCallout)
-
    previousCallout = sound.play(fileName,soundDevice,volume)
-
 end
 
 local callouts = {
@@ -200,13 +199,13 @@ local callouts = {
          repeat
             if self:takeoffCancelled() then return false end
             criticalLoop()
-         until self:V1()
+         until self:V1(iV1Select)
       end
 
       repeat
          if self:takeoffCancelled() then return false end
          criticalLoop()
-      until self:rotate()
+      until self:rotate(iVrSelect)
 
       repeat
          if self:takeoffCancelled() then return false end
@@ -254,7 +253,7 @@ local callouts = {
       return b100kts
    end,
 
-   V1 = function(self)
+   V1 = function(self,iV1Select)
       local bV1
       local iALT = ipc.readUD(0x31e4)/65536
       local iIAS = ipc.readUW(0x02bc)/128
@@ -267,7 +266,7 @@ local callouts = {
       return bV1
    end,
 
-   rotate = function(self)
+   rotate = function(self,iVrSelect)
       local bVr
       local iALT = ipc.readUD(0x31e4)/65536
       local iIAS = ipc.readUW(0x02bc)/128
@@ -307,7 +306,7 @@ local callouts = {
       if (iALT < 15.0) and iSpoiler_L_deployed and iSpoiler_L_deployed then
          bSpoilersDeployed = true
          log("spoilers deployed")
-         announce("spoilers", 900, 1) -- play "spoilers" callout
+         announce("spoilers") -- play "spoilers" callout
       elseif ((groundSpeed() <= 100.0) or ((iReverser_L >= reverserDoorThreshold) and (iReverser_R >= reverserDoorThreshold))) then -- skip criterium
          bSkipThis = true
          log("skipped spoilers deployed")
@@ -323,7 +322,7 @@ local callouts = {
       if ((iReverser_L >= reverserDoorThreshold) and (iReverser_R >= reverserDoorThreshold)) then
          bReversersActive = true
          log("detected reverse green")
-         announce("reverseGreen",1) -- play "reverse green" callout
+         announce("reverseGreen") -- play "reverse green" callout
       elseif (groundSpeed() <= 90.0) then -- skip criterium
          bSkipThis = true
          log("skipped reverse green")
@@ -338,7 +337,7 @@ local callouts = {
       if (iAccelLateral < -4.0) then
          bDecel = true
          log("detected deceleration")
-         announce("decel",1) -- play "decel" callout
+         announce("decel") -- play "decel" callout
       elseif (groundSpeed() <= 80.0) then -- skip criterium
          bSkipThis = true
          log("not enough deceleration -> skipped callout")
@@ -371,10 +370,11 @@ local callouts = {
          local leftPressure = ipc.readLvar("VC_MIP_BrkPress_L")
          local rightPressure = ipc.readLvar("VC_MIP_BrkPress_R")
          local pushback = ipc.readLvar("FSLA320_NWS_Pin") == 1
+         local brakeAppThreshold = 1
 
-         if not pushback and groundSpeed() > 1 and leftBrakeApp > 0 and rightBrakeApp > 0 then
-            ipc.sleep(500)
-            if leftBrakeApp > 0 and rightBrakeApp > 0 and leftPressure == 0 and rightPressure == 0 then
+         if not pushback and groundSpeed() > 0.5 and leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
+            ipc.sleep(2000)
+            if leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold and leftPressure == 0 and rightPressure == 0 then
                announce("pressureZero")
                brakesChecked = true
             end
