@@ -89,6 +89,8 @@ function restingLoop() ipc.sleep(loopCycleResting) end
 function criticalLoop() ipc.sleep(loopCycleCritical) end
 function onGround() return ipc.readUB(0x0366) == 1 end
 function groundSpeed() return ipc.readUD(0x02B4) / 65536 * 3600 / 1852 end
+function ALT() return ipc.readUD(0x31E4) / 65536 end
+function IAS() return ipc.readUW(0x02BC) / 128 end
 function timePassedSince(ref) return ipc.elapsedtime() - ref end
 
 function thrustLeversSetForTakeoff()
@@ -119,10 +121,15 @@ function announce(fileName)
    previousCallout = sound.play(fileName,sound_device,volume)
 end
 
+function reverseSelected()
+   return (FSL.getThrustLeversPos(1) == "REV_IDLE" and FSL.getThrustLeversPos(2) = "REV_IDLE") or (FSL.getThrustLeversPos(1) == "REV_MAX" and FSL.getThrustLeversPos(2) == "REV_MAX")
+end
+
 local callouts = {
 
    init = function(self)
       self.airborne = not onGround()
+      self.reverseSelectedAtTime = nil
       self.cancelCountDownStart = nil
       self.landedAtTime = nil
       self.takeoffAbortedAtTime = nil
@@ -153,21 +160,19 @@ local callouts = {
             local takeoff = self:takeoff()
             local abortedTakeoff = not takeoff and self.takeoffAbortedAtTime
             self.falseTrigger = not takeoff and not abortedTakeoff
-            if self.falseTrigger then return end
+            if self.falseTrigger or not enginesRunning() then return end
             restingLoop()
-         until takeoff or abortedTakeoff or not enginesRunning()
+         until takeoff or abortedTakeoff
       end
-
-      if not enginesRunning() then return end
 
       while not onGround() do
          if not self.airborne then self.airborne = true end
-         restingLoop()
+         if ALT() > 100 then restingLoop() else criticalLoop() end
       end
 
       if self.airborne then self.landedAtTime = ipc.elapsedtime() end
 
-      self:rollout()
+      if groundSpeed() > 60 then self:rollout() end
 
       self.skipChecks = true
 
@@ -237,9 +242,9 @@ local callouts = {
    end,
 
    rollout = function(self)
-      repeat criticalLoop() until self:spoilers()
+      if self.landedAtTime() then repeat criticalLoop() until self:spoilers() end
       repeat criticalLoop() until self:reverseGreen()
-      repeat criticalLoop() until self:decel()
+      if groundSpeed() > 70 then repeat criticalLoop() until self:decel() end
       repeat criticalLoop() until self:seventy()
    end,
 
@@ -247,12 +252,12 @@ local callouts = {
       local thrustSet, skipThis
       local ALT = ipc.readUD(0x31e4)/65536
       local IAS = ipc.readUW(0x02bc)/128
-      if (ALT < 10.0) and thrustIsSet() then
+      if ALT < 10.0 and thrustIsSet() then
          thrustSet = true
          ipc.sleep(800) -- wait for further spool up
          announce("thrustSet")
          log("thrust set")
-      elseif (IAS > 80.0) then
+      elseif IAS > 80.0 then
          skipThis = true
          log("thrust set skipped (IAS > 80 kts)")
       end
@@ -263,7 +268,7 @@ local callouts = {
       local oneHundred
       local ALT = ipc.readUD(0x31e4)/65536
       local IAS = ipc.readUW(0x02bc)/128
-      if (ALT < 10.0 and IAS >= 100.0) then
+      if ALT < 10.0 and IAS >= 100.0 then
          oneHundred = true
          announce("100knots")
          log("reached 100 kts")
@@ -275,7 +280,7 @@ local callouts = {
       local V1
       local ALT = ipc.readUD(0x31e4)/65536
       local IAS = ipc.readUW(0x02bc)/128
-      if (ALT < 10.0 and IAS >= V1Select) then
+      if ALT < 10.0 and IAS >= V1Select then
          V1 = true
          announce("v1", 900)
          log("reached V1")
@@ -287,7 +292,7 @@ local callouts = {
       local rotate
       local ALT = ipc.readUD(0x31e4)/65536
       local IAS = ipc.readUW(0x02bc)/128
-      if (ALT < 10.0 and IAS >= VrSelect) then
+      if ALT < 10.0 and IAS >= VrSelect then
          rotate = true
          announce("rotate")
          log("reached Vr")
@@ -299,11 +304,11 @@ local callouts = {
       local positiveClimb, skipThis
       local ALT = ipc.readUD(0x31e4)/65536
       local vertSpeed = ipc.readSW(0x02c8)*60*3.28084/256
-      if (ALT >= 10.0 and vertSpeed >= 500) then
+      if ALT >= 10.0 and vertSpeed >= 500 then
          positiveClimb = true
          announce("positiveClimb")
          log("reached positive climb")
-      elseif (ALT > 150.0) then -- skip criterium: 150m / 500ft
+      elseif ALT > 150.0 then -- skip criterium: 150m / 500ft
          skipThis = true
          log("positive climb skipped (ALT > 500ft)")
       end
@@ -311,57 +316,54 @@ local callouts = {
    end,
 
    spoilers = function(self)
-      local spoilers, skipThis
-      local ALT = ipc.readUD(0x31e4)/65536
-      local spoiler_L_Deployed = ipc.readLvar("FSLA320_spoiler_l_2") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_3") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_4") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_5") > spoilerThreshold
-      local spoiler_R_Deployed = ipc.readLvar("FSLA320_spoiler_r_2") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_3") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_4") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_5") > spoilerThreshold
-      local reverser_L = ipc.readLvar("FSLA320_reverser_left")
-      local reverser_R = ipc.readLvar("FSLA320_reverser_right")
-
-      if spoiler_L_Deployed and spoiler_L_Deployed then
-         spoilers = true
-         log("spoilers deployed")
-         announce("spoilers")
-
-      elseif groundSpeed() <= 100 then skipThis = true 
-      elseif timePassedSince(self.landedAtTime or self.takeoffAbortedAtTime) > 2000 then 
-         ipc.sleep(1000)
-         if onGround() then
-            skipThis = true 
-         end
+      local spoilers_left = ipc.readLvar("FSLA320_spoiler_l_2") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_3") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_4") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_5") > spoilerThreshold
+      local spoilers_right = ipc.readLvar("FSLA320_spoiler_r_2") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_3") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_4") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_5") > spoilerThreshold
+      local spoilers = spoilers_left and spoilers_right
+      local noSpoilers
+      if not spoilers and onGround() and timePassedSince(self.landedAtTime) > 2000 then 
+         noSpoilers = true
       end
-      if skipThis then log("skipped spoilers deployed") end
+      if noSpoilers then log("spoilers didn't deploy :(") 
+      elseif spoilers then log("spoilers deployed") announce("spoilers") end
 
-      return spoilers or skipThis
+      return spoilers or noSpoilers
    end,
 
    reverseGreen = function(self)
-      local reverseGreen, skipThis
-      local reverser_L = ipc.readLvar("FSLA320_reverser_left")
-      local reverser_R = ipc.readLvar("FSLA320_reverser_right")
-      if ((reverser_L >= reverserDoorThreshold) and (reverser_R >= reverserDoorThreshold)) then
-         reverseGreen = true
-         log("detected reverse green")
-         announce("reverseGreen")
-      elseif (groundSpeed() <= 90.0) then
-         skipThis = true
-         log("skipped reverse green")
+      local leftReverser = ipc.readLvar("FSLA320_reverser_left")
+      local rightReverser = ipc.readLvar("FSLA320_reverser_right")
+      local reverseGreen = leftReverser >= reverserDoorThreshold and rightReverser >= reverserDoorThreshold
+      local noReverse
+
+      if reverseSelected() and not self.reverseSelectedAtTime then 
+         self.reverseSelectedAtTime = ipc.elapsedtime() 
       end
-      return reverseGreen or skipThis
+      if self.reverseSelectedAtTime and not reverseGreen and timePassedSince(self.reverseSelectedAtTime) > 5000 then
+         noReverse = true
+         log("reverse isn't green :(")
+      end
+
+      if reverseGreen then
+         log("reverse is green")
+         announce("reverseGreen")
+      end
+      return reverseGreen or noReverse
    end,
 
    decel = function(self)
-      local decel, skipThis
+      local noDecel
       local accelLateral = ipc.readDBL(0x3070)
-      if accelLateral < -4.0 then
+      local decel = accelLateral < -4.0
+      if decel then
          decel = true
-         log("detected deceleration")
+         log("decel")
          announce("decel")
-      elseif groundSpeed() <= 80.0 then -- skip criterium
-         skipThis = true
-         log("not enough deceleration -> skipped callout")
+      elseif timePassedSince(self.landedAtTime or self.takeoffAbortedAtTime) > 10000 then
+         noDecel = true
+         log("no decel")
       end
-      return decel or skipThis
+      
+      return decel or noDecel
    end,
 
    seventy = function(self)
