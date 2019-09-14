@@ -268,8 +268,10 @@ function FSL.control:__call(targetpos)
          ipc.control(rotorbrake, self.tgl)
       end
       local t = plusminus(self.time or 300) - 50
-      if human and not noPauses then ipc.sleep(t) end
-      FSL_log("Interaction with the control took " .. t .. " ms")
+      if human and not noPauses then
+         ipc.sleep(t)
+         FSL_log("Interaction with the control took " .. t .. " ms")
+      end
    elseif self.posn then
       local currpos = self:getVar()
       targetpos = self.posn[targetpos:upper()]
@@ -285,8 +287,9 @@ function FSL.control:__call(targetpos)
                else ipc.control(rotorbrake, self.dec) end
             else break end
             local t = plusminus(self.time or 300)
-            if human and not noPauses then ipc.sleep(t) end
-            FSL_log("Interaction with the control took " .. t .. " ms")
+            if human and not noPauses then
+               FSL_log("Interaction with the control took " .. t .. " ms")
+               ipc.sleep(t) end
          end
       end
    end
@@ -481,8 +484,8 @@ else
    setmetatable(FSL,_FSL)
 end
 
-log(" ", 0, 1)
-log("*******************************************************************************************", 0, 1) 
-log(" ", 0, 1)
+FSL_log(" ", 0, 1)
+FSL_log("*******************************************************************************************", 0, 1) 
+FSL_log(" ", 0, 1)
 
 return FSL

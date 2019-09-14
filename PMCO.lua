@@ -9,51 +9,52 @@
 -- Callouts:
 
 play_V1 = 1 -- play V1 sound? 0 = no, 1 = yes
-V1_timing = 0 --V1 will be announced at the speed of V1 - V1_timing. If you want V1 to be announced slightly before V1 is reached on the PFD, enter the number of kts.
+V1_timing = 0 -- V1 will be announced at the speed of V1 - V1_timing. If you want V1 to be announced slightly before V1 is reached on the PFD, type the number of knots.
 PM = 2 -- Pilot Monitoring: 1 = Captain, 2 = First Officer
-display_startup_message = 1 -- show startup message? 0 = no, 1 = yes
+show_startup_message = 1 -- show startup message? 0 = no, 1 = yes
 sound_device = 0 -- zero is default (only change this when no sound is played)
 volume = 65 -- volume of all callouts (zero does NOT mean silenced, just rather quiet)
-PM_announces_flightcontrol_check = 1 -- PM calls out 'full left', 'full right' etc.
-PM_announces_brake_check = 1 -- PM calls out 'brake pressure zero' after the brake check. The trigger is the first application of the brakes after you start moving
+PM_announces_flightcontrol_check = 1 -- PM announces 'full left', 'full right' etc.
+PM_announces_brake_check = 1 -- PM announces 'brake pressure zero' after the brake check. The trigger is the first application of the brakes after you start moving
 
 -- Actions:
 
 enable_actions = 0 -- allow the PM to perform the procedures that are listed below
 SOP = "default"
 
--- Enable or disable individual procedures in the 'default' SOP and change their related options:
+-- Enable or disable individual procedures in the default SOP and change their related options:
 
 after_start = 1 -- triggered when at least one engine is running and the engine mode selector is in the 'NORM' position
 during_taxi = 1 -- the PM will press the AUTO BRK and TO CONFIG buttons after you've done the brake and flight controls checks
 lineup = 1 -- triggered by cycling the seat belts sign switch twice within 2 seconds
-after_takeoff = 1 -- triggered by moving the thrust levers into the 'CLB' detent
+after_takeoff = 1 -- triggered by moving the thrust levers back into the 'CLB' detent
 after_landing = 1 -- triggered when the ground speed is less than 30 kts and you have disarmed the spoilers
 
-packs_on_takeoff = 0 -- 0 = takeoff with packs OFF. This option will be ignored if a performance request is found in the ATSU log
+packs_on_takeoff = 0 -- 1 = takeoff with the packs on. This option will be ignored if a performance request is found in the ATSU log
 pack2_off_after_landing = 0
 
 -- ##################################################################
 -- ############### END OF USER OPTIONS ##############################
 -- ##################################################################
 
--- Don't edit below this line unless you're some kind of hacker or something ------------
+-- Do not edit below this line ----------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
 pilot = PM
 noPauses = true
 local FSL = require("FSL")
 
-local sound_path = "..\\Modules\\PMCO_Sounds\\" -- path to the callout sounds
-local loopCycleCritical = 100 -- cycle time for critical loops
-local loopCycleResting = 1000 -- cycle time for resting loops
-local PFD_delay = 650 --milliseconds
-local ECAM_delay = 300
+local sound_path = "..\\Modules\\PMCO_Sounds\\" 
+local loopCycleCritical = 100
+local loopCycleResting = 1000
+local PFD_delay = 650
+local ECAM_delay = 3000
 local TL_takeoffThreshold = 26
 local TL_reverseThreshold = 100
 local reverserDoorThreshold = 90
-local spoilerThreshold = 200
-local previousCallout
+local spoilersDeployedThreshold = 200
+local previousCalloutEndTime
+local reactionTime = 300
 
 -- Logging ------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
@@ -104,25 +105,23 @@ function enginesRunning()
    return eng1_N1 > 15 and eng2_N1 > 15
 end
 
-function thrustIsSet()
+function takeoffThrustIsSet()
    local eng1_N1 = ipc.readUW(0x0898) * 100 / 16384
    local eng2_N1 = ipc.readUW(0x0930) * 100 / 16384
    return eng1_N1 > 80 and eng2_N1 > 80
 end
 
-function announce(fileName)
-   local reactionTime = 750
-   if fileName == "spoilers" or fileName =="reverseGreen" or fileName == "decel" or fileName == "70knots" then
-      ipc.sleep(ECAM_delay + reactionTime)
-   elseif fileName == "100knots" or fileName == "v1" or fileName == "rotate" then
-       ipc.sleep(PFD_delay) 
+function play(fileName,length)
+   if previousCalloutEndTime and previousCalloutEndTime - ipc.elapsedtime() > 0 then
+      ipc.sleep(previousCalloutEndTime - ipc.elapsedtime())
    end
-   repeat ipc.sleep(50) until not sound.query(previousCallout)
-   previousCallout = sound.play(fileName,sound_device,volume)
+   sound.play(fileName,sound_device,volume)
+   if length then previousCalloutEndTime = ipc.elapsedtime() + length
+   else previousCalloutEndTime = nil end
 end
 
 function reverseSelected()
-   return (FSL.getThrustLeversPos(1) == "REV_IDLE" and FSL.getThrustLeversPos(2) = "REV_IDLE") or (FSL.getThrustLeversPos(1) == "REV_MAX" and FSL.getThrustLeversPos(2) == "REV_MAX")
+   return (FSL.getThrustLeversPos(1) == "REV_IDLE" and FSL.getThrustLeversPos(2) == "REV_IDLE") or (FSL.getThrustLeversPos(1) == "REV_MAX" and FSL.getThrustLeversPos(2) == "REV_MAX")
 end
 
 local callouts = {
@@ -130,16 +129,13 @@ local callouts = {
    init = function(self)
       self.airborne = not onGround()
       self.reverseSelectedAtTime = nil
-      self.cancelCountDownStart = nil
       self.landedAtTime = nil
       self.takeoffAbortedAtTime = nil
-      self.brakesChecked = false
-      self.flightControlsChecked = false
       ipc.set("flightControlsChecked", nil)
       ipc.set("brakesChecked", nil)
    end,
 
-   __call = function(self) -- main logic
+   __call = function(self)
 
       if not self.falseTrigger then self:init() end
 
@@ -149,10 +145,10 @@ local callouts = {
       until enginesRunning()
 
       if onGround() and not self.skipChecks then
-         local flightControlsCheck = coroutine.create(function() self:flightControlsCheck() end)
-         local brakeCheck = coroutine.create(function() self:brakeCheck() end)
+         local flightControlsCheckOrSkip = coroutine.create(function() self:flightControlsCheck() end)
+         local brakeCheckOrSkip = coroutine.create(function() self:brakeCheck() end)
          repeat ipc.sleep(5)
-         until not coroutine.resume(flightControlsCheck) and not coroutine.resume(brakeCheck)
+         until not coroutine.resume(flightControlsCheckOrSkip) and not coroutine.resume(brakeCheckOrSkip)
       end
 
       if onGround() then 
@@ -181,16 +177,17 @@ local callouts = {
    takeoffCancelled = function (self)
       local waitUntilCancel = 10000
       if not thrustLeversSetForTakeoff() then
-         local aborted = thrustIsSet() and groundSpeed() > 10 and (FSL.getThrustLeversPos(1) == "IDLE" and FSL.getThrustLeversPos(2) == "IDLE") or (FSL.getThrustLeversPos(1) == "REV_IDLE" and FSL.getThrustLeversPos(2) == "REV_IDLE") or (FSL.getThrustLeversPos(1) == "REV_MAX" and FSL.getThrustLeversPos(2) == "REV_MAX")
+         local aborted = takeoffThrustIsSet() and groundSpeed() > 10 and (FSL.getThrustLeversPos(1) == "IDLE" and FSL.getThrustLeversPos(2) == "IDLE") or (FSL.getThrustLeversPos(1) == "REV_IDLE" and FSL.getThrustLeversPos(2) == "REV_IDLE") or (FSL.getThrustLeversPos(1) == "REV_MAX" and FSL.getThrustLeversPos(2) == "REV_MAX")
          if aborted then
             self.takeoffAbortedAtTime = ipc.elapsedtime()
+            self.cancelCountDownStart = nil
             return true 
          end
          if not self.cancelCountDownStart then
             self.cancelCountDownStart = ipc.elapsedtime()
          elseif ipc.elapsedtime() - self.cancelCountDownStart > waitUntilCancel then
-            self.cancelCountDownStart = nil
             log("Cancelling the takeoff logic because the thrust levers were moved back for longer than " .. waitUntilCancel / 1000 .. " seconds")
+            self.cancelCountDownStart = nil
             return true
          end
       elseif self.cancelCountDownStart then self.cancelCountDownStart = nil end
@@ -198,14 +195,13 @@ local callouts = {
 
    takeoff = function(self)
 
-      repeat restingLoop() until thrustLeversSetForTakeoff()
-      ipc.sleep(5000)
-      if not thrustLeversSetForTakeoff() then return false end
+      while not thrustLeversSetForTakeoff() do restingLoop() end
 
       FSL.PED_MCDU_KEY_PERF()
       ipc.sleep(500)
       local V1Select = tonumber(FSL.MCDU.getDisplay(PM,49,51))
       local VrSelect = tonumber(FSL.MCDU.getDisplay(PM,97,99))
+      ipc.sleep(1000)
       FSL.PED_MCDU_KEY_FPLN()
       if not V1Select then log("V1 hasn't been entered") end
       if not VrSelect then log("Vr hasn't been entered") end
@@ -242,7 +238,7 @@ local callouts = {
    end,
 
    rollout = function(self)
-      if self.landedAtTime() then repeat criticalLoop() until self:spoilers() end
+      if self.landedAtTime then repeat criticalLoop() until self:spoilers() end
       repeat criticalLoop() until self:reverseGreen()
       if groundSpeed() > 70 then repeat criticalLoop() until self:decel() end
       repeat criticalLoop() until self:seventy()
@@ -250,14 +246,12 @@ local callouts = {
 
    thrustSet = function(self)
       local thrustSet, skipThis
-      local ALT = ipc.readUD(0x31e4)/65536
-      local IAS = ipc.readUW(0x02bc)/128
-      if ALT < 10.0 and thrustIsSet() then
+      if ALT() < 10 and takeoffThrustIsSet() then
          thrustSet = true
          ipc.sleep(800) -- wait for further spool up
-         announce("thrustSet")
-         log("thrust set")
-      elseif IAS > 80.0 then
+         play("thrustSet")
+         log("Thrust set")
+      elseif IAS() > 80 then
          skipThis = true
          log("thrust set skipped (IAS > 80 kts)")
       end
@@ -266,11 +260,10 @@ local callouts = {
 
    oneHundred = function(self)
       local oneHundred
-      local ALT = ipc.readUD(0x31e4)/65536
-      local IAS = ipc.readUW(0x02bc)/128
-      if ALT < 10.0 and IAS >= 100.0 then
+      if ALT() < 10 and IAS() >= 100 then
          oneHundred = true
-         announce("100knots")
+         ipc.sleep(PFD_delay)
+         play("oneHundred")
          log("reached 100 kts")
       end
       return oneHundred
@@ -278,11 +271,10 @@ local callouts = {
 
    V1 = function(self,V1Select)
       local V1
-      local ALT = ipc.readUD(0x31e4)/65536
-      local IAS = ipc.readUW(0x02bc)/128
-      if ALT < 10.0 and IAS >= V1Select then
+      if ALT() < 10 and IAS() >= V1Select then
          V1 = true
-         announce("v1", 900)
+         ipc.sleep(PFD_delay)
+         play("v1", 900)
          log("reached V1")
       end
       return V1
@@ -290,11 +282,10 @@ local callouts = {
 
    rotate = function(self,VrSelect)
       local rotate
-      local ALT = ipc.readUD(0x31e4)/65536
-      local IAS = ipc.readUW(0x02bc)/128
-      if ALT < 10.0 and IAS >= VrSelect then
+      if ALT() < 10 and IAS() >= VrSelect then
          rotate = true
-         announce("rotate")
+         ipc.sleep(PFD_delay)
+         play("rotate")
          log("reached Vr")
       end
       return rotate
@@ -302,13 +293,12 @@ local callouts = {
 
    positiveClimb = function(self)
       local positiveClimb, skipThis
-      local ALT = ipc.readUD(0x31e4)/65536
-      local vertSpeed = ipc.readSW(0x02c8)*60*3.28084/256
-      if ALT >= 10.0 and vertSpeed >= 500 then
+      local vertSpeed = ipc.readSW(0x02C8) * 60 * 3.28084 / 256
+      if ALT() >= 10 and vertSpeed >= 500 then
          positiveClimb = true
-         announce("positiveClimb")
+         play("positiveClimb")
          log("reached positive climb")
-      elseif ALT > 150.0 then -- skip criterium: 150m / 500ft
+      elseif ALT() > 150.0 then -- skip criterium: 150m / 500ft
          skipThis = true
          log("positive climb skipped (ALT > 500ft)")
       end
@@ -316,25 +306,25 @@ local callouts = {
    end,
 
    spoilers = function(self)
-      local spoilers_left = ipc.readLvar("FSLA320_spoiler_l_2") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_3") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_4") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_l_5") > spoilerThreshold
-      local spoilers_right = ipc.readLvar("FSLA320_spoiler_r_2") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_3") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_4") > spoilerThreshold and ipc.readLvar("FSLA320_spoiler_r_5") > spoilerThreshold
+      local spoilers_left = ipc.readLvar("FSLA320_spoiler_l_2") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_l_3") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_l_4") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_l_5") > spoilersDeployedThreshold
+      local spoilers_right = ipc.readLvar("FSLA320_spoiler_r_2") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_r_3") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_r_4") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_r_5") > spoilersDeployedThreshold
       local spoilers = spoilers_left and spoilers_right
       local noSpoilers
-      if not spoilers and onGround() and timePassedSince(self.landedAtTime) > 2000 then 
+      if not spoilers and onGround() and timePassedSince(self.landedAtTime) > 5000 then 
          noSpoilers = true
       end
       if noSpoilers then log("spoilers didn't deploy :(") 
-      elseif spoilers then log("spoilers deployed") announce("spoilers") end
-
+      elseif spoilers then
+         log("spoilers deployed") 
+         ipc.sleep(ECAM_delay + reactionTime)
+         play("spoilers",900)
+      end
       return spoilers or noSpoilers
    end,
 
    reverseGreen = function(self)
-      local leftReverser = ipc.readLvar("FSLA320_reverser_left")
-      local rightReverser = ipc.readLvar("FSLA320_reverser_right")
-      local reverseGreen = leftReverser >= reverserDoorThreshold and rightReverser >= reverserDoorThreshold
+      local reverseGreen = ipc.readLvar("FSLA320_reverser_left") >= reverserDoorThreshold and ipc.readLvar("FSLA320_reverser_right") >= reverserDoorThreshold
       local noReverse
-
       if reverseSelected() and not self.reverseSelectedAtTime then 
          self.reverseSelectedAtTime = ipc.elapsedtime() 
       end
@@ -342,10 +332,10 @@ local callouts = {
          noReverse = true
          log("reverse isn't green :(")
       end
-
       if reverseGreen then
          log("reverse is green")
-         announce("reverseGreen")
+         ipc.sleep(ECAM_delay + reactionTime)
+         play("reverseGreen",900)
       end
       return reverseGreen or noReverse
    end,
@@ -353,24 +343,25 @@ local callouts = {
    decel = function(self)
       local noDecel
       local accelLateral = ipc.readDBL(0x3070)
-      local decel = accelLateral < -4.0
+      local decel = accelLateral < -4
       if decel then
          decel = true
          log("decel")
-         announce("decel")
+         ipc.sleep(ECAM_delay + reactionTime)
+         play("decel",600)
       elseif timePassedSince(self.landedAtTime or self.takeoffAbortedAtTime) > 10000 then
          noDecel = true
          log("no decel")
       end
-      
       return decel or noDecel
    end,
 
    seventy = function(self)
       local seventy
-      if groundSpeed() <= 70.0 then
+      if groundSpeed() <= 70 then
          seventy = true
-         announce("70knots")
+         ipc.sleep(ECAM_delay + reactionTime)
+         play("seventy")
          log("reached 70 kts")
       end
       return seventy
@@ -396,7 +387,7 @@ local callouts = {
          if not pushback and groundSpeed() > 0.5 and leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
             ipc.sleep(2000)
             if leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold and leftPressure == 0 and rightPressure == 0 then
-               announce("pressureZero")
+               play("pressureZero")
                brakesChecked = true
             end
          end
@@ -406,7 +397,6 @@ local callouts = {
       until brakesChecked
 
       ipc.set("brakesChecked",1)
-      self.brakesChecked = true
 
    end
 }
@@ -432,72 +422,63 @@ callouts.flightControlsCheck = {
          -- full left aileron
          if not fullLeft and not ((fullUp or fullDown) and not yNeutral) and self:fullLeft() then
             ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullLeft1")
+            play("fullLeft1")
             fullLeft = true
          end
 
          -- full right aileron
          if not fullRight and not ((fullUp or fullDown) and not yNeutral) and self:fullRight() then
             ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullRight1")
+            play("fullRight1")
             fullRight = true
          end
 
          -- neutral after full left and full right aileron
          if fullLeft and fullRight and not xNeutral and self:stickNeutral() then
             ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("neutral1")
+            play("neutral1")
             xNeutral = true
          end
 
          -- full up
          if not fullUp and not ((fullLeft or fullRight) and not xNeutral) and self:fullUp() then
             ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullUp")
+            play("fullUp")
             fullUp = true
          end
 
          -- full down
          if not fullDown and not ((fullLeft or fullRight) and not xNeutral) and self:fullDown() then
             ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullDown")
+            play("fullDown")
             fullDown = true
          end
 
          -- neutral after full up and full down
          if fullUp and fullDown and not yNeutral and self:stickNeutral() then
             ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("neutral2")
+            play("neutral2")
             yNeutral = true
          end
 
          -- full left rudder
          if not fullLeftRud and xNeutral and yNeutral and self:fullLeftRud() then
             ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullLeft2")
+            play("fullLeft2")
             fullLeftRud = true
          end
 
          -- full right rudder
          if not fullRightRud and xNeutral and yNeutral and self:fullRightRud() then
             ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("fullRight2")
+            play("fullRight2")
             fullRightRud = true
          end
 
          -- neutral after full left and full right rudder
          if fullLeftRud and fullRightRud and not rudNeutral and self:rudNeutral() then
             ipc.sleep(ECAM_delay)
-            ipc.sleep(plusminus(300))
-            announce("neutral3")
+            play("neutral3")
             rudNeutral = true
          end
 
@@ -507,7 +488,6 @@ callouts.flightControlsCheck = {
 
       until xNeutral and yNeutral and rudNeutral
 
-      self.flightControlsChecked = true
       ipc.set("flightControlsChecked",1)
    end,
 
@@ -625,9 +605,8 @@ do
    log(">>>>>> script started <<<<<<")
    log("user option 'Play V1 callout': " .. play_V1)
    log("user option 'Pilot Monitoring': " .. PM)
-   local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. play_V1 .. "\n\nCallout volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM
-   if display_startup_message == 1 then ipc.display(msg,20) end
+   local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. play_V1 .. "\n\nCallouts volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM
+   if show_startup_message == 1 then ipc.display(msg,20) end
 end
 
---running the callouts function in an infinite loop
 while true do callouts() end
