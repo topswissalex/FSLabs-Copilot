@@ -295,13 +295,9 @@ function FSL.control:__call(targetpos)
    end
 end
 
-function FSL.control:getVar()
-   return ipc.readLvar(self.var)
-end
+function FSL.control:getVar() return ipc.readLvar(self.var) end
 
-function FSL.control:isDown()
-   return ipc.readLvar(self.var) == 10
-end
+function FSL.control:isDown() return ipc.readLvar(self.var) == 10 end
 
 function FSL.control:isLit()
    if type(self.Lt) == "string" then return ipc.readLvar(self.Lt) == 1
@@ -370,7 +366,11 @@ function FSL.getThrustLeversPos(TL)
    elseif TL == 2 then pos = ipc.readLvar("VC_PED_TL_2")
    end
    for k,v in pairs(FSL.TL_posns) do
-      if math.abs(pos - v) < 4 then return k end
+      if pos and math.abs(pos - v) < 4 then
+         return k
+      elseif not pos then
+         return math.abs(ipc.readLvar("VC_PED_TL_1")  - v) < 4 and math.abs(ipc.readLvar("VC_PED_TL_2")  - v) < 4
+      end
    end 
 end
 
@@ -413,7 +413,7 @@ function FSL.control.CPT.trimwheel:set(CG,step)
       local dist = math.abs(CG_ind - CG)
       local speed = plusminus(0.2) -- the reciprocal of the speed, actually
       if step then speed = plusminus(0.07) end
-      local time = math.ceil(1000/(dist/speed))
+      local time = math.ceil(1000 / (dist / speed))
       if time < 40 then time = 40 end
       if time > 1000 then time = 1000 end
       if step and time > 70 then time = 70 end

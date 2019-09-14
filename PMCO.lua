@@ -43,12 +43,13 @@ pack2_off_after_landing = 0
 pilot = PM
 noPauses = true
 local FSL = require("FSL")
+local readLvar = ipc.readLvar
 
 local sound_path = "..\\Modules\\PMCO_Sounds\\" 
 local loopCycleCritical = 100
 local loopCycleResting = 1000
 local PFD_delay = 650
-local ECAM_delay = 3000
+local ECAM_delay = 300
 local TL_takeoffThreshold = 26
 local TL_reverseThreshold = 100
 local reverserDoorThreshold = 90
@@ -93,9 +94,10 @@ function groundSpeed() return ipc.readUD(0x02B4) / 65536 * 3600 / 1852 end
 function ALT() return ipc.readUD(0x31E4) / 65536 end
 function IAS() return ipc.readUW(0x02BC) / 128 end
 function timePassedSince(ref) return ipc.elapsedtime() - ref end
+function reverseSelected() return readLvar("VC_PED_TL_1") > 100 and readLvar("VC_PED_TL_2") > 100 end
 
 function thrustLeversSetForTakeoff()
-   local TL1, TL2 = ipc.readLvar("VC_PED_TL_1"), ipc.readLvar("VC_PED_TL_2")
+   local TL1, TL2 = readLvar("VC_PED_TL_1"), readLvar("VC_PED_TL_2")
    return TL1 < TL_reverseThreshold and TL1 >= TL_takeoffThreshold and TL2 < TL_reverseThreshold and TL2 >= TL_takeoffThreshold
 end
 
@@ -111,6 +113,18 @@ function takeoffThrustIsSet()
    return eng1_N1 > 80 and eng2_N1 > 80
 end
 
+function getTakeoffSpeedsFromMCDU()
+   FSL.PED_MCDU_KEY_PERF()
+   ipc.sleep(500)
+   local V1 = tonumber(FSL.MCDU.getDisplay(PM,49,51))
+   local Vr = tonumber(FSL.MCDU.getDisplay(PM,97,99))
+   ipc.sleep(1000)
+   FSL.PED_MCDU_KEY_FPLN()
+   if not V1 then log("V1 hasn't been entered") end
+   if not Vr then log("Vr hasn't been entered") end
+   return V1, Vr
+end
+
 function play(fileName,length)
    if previousCalloutEndTime and previousCalloutEndTime - ipc.elapsedtime() > 0 then
       ipc.sleep(previousCalloutEndTime - ipc.elapsedtime())
@@ -120,38 +134,39 @@ function play(fileName,length)
    else previousCalloutEndTime = nil end
 end
 
-function reverseSelected()
-   return (FSL.getThrustLeversPos(1) == "REV_IDLE" and FSL.getThrustLeversPos(2) == "REV_IDLE") or (FSL.getThrustLeversPos(1) == "REV_MAX" and FSL.getThrustLeversPos(2) == "REV_MAX")
-end
-
 local callouts = {
 
    init = function(self)
       self.airborne = not onGround()
-      self.reverseSelectedAtTime = nil
-      self.landedAtTime = nil
+      self.brakesChecked = false
+      self.flightControlsChecked = false
       self.takeoffAbortedAtTime = nil
-      ipc.set("flightControlsChecked", nil)
+      self.landedAtTime = nil
+      self.reverseSelectedAtTime = nil
+      self.reverseFuncEndedAtTime = nil
       ipc.set("brakesChecked", nil)
+      ipc.set("flightControlsChecked", nil)
    end,
 
    __call = function(self)
 
       if not self.falseTrigger then self:init() end
 
-      repeat
-         if not enginesRunning() then self.skipChecks = false end
+      while onGround() and not thrustLeversSetForTakeoff() do
+         if self.skipChecks and not enginesRunning() then self.skipChecks = false end
          restingLoop()
-      until enginesRunning()
+      end
 
       if onGround() and not self.skipChecks then
          local flightControlsCheckOrSkip = coroutine.create(function() self:flightControlsCheck() end)
          local brakeCheckOrSkip = coroutine.create(function() self:brakeCheck() end)
          repeat ipc.sleep(5)
-         until not coroutine.resume(flightControlsCheckOrSkip) and not coroutine.resume(brakeCheckOrSkip)
+            local flightControlsCheckedOrSkipped = self.flightControlsChecked or not coroutine.resume(flightControlsCheckOrSkip)
+            local brakesCheckedOrSkipped = self.brakesChecked or not coroutine.resume(brakeCheckOrSkip)
+         until flightControlsCheckedOrSkipped and brakesCheckedOrSkipped
       end
 
-      if onGround() then 
+      if onGround() then
          repeat 
             local takeoff = self:takeoff()
             local abortedTakeoff = not takeoff and self.takeoffAbortedAtTime
@@ -159,6 +174,11 @@ local callouts = {
             if self.falseTrigger or not enginesRunning() then return end
             restingLoop()
          until takeoff or abortedTakeoff
+      elseif self.circuit then
+         repeat
+            criticalLoop()
+            if self:positiveClimb() then self.circuit = false end
+         until not self.circuit
       end
 
       while not onGround() do
@@ -174,11 +194,17 @@ local callouts = {
 
    end,
 
+   doingCircuits = function(self)
+      self.circuit = thrustLeversSetForTakeoff() and not onGround() 
+      return self.circuit
+   end,
+
    takeoffCancelled = function (self)
       local waitUntilCancel = 10000
       if not thrustLeversSetForTakeoff() then
-         local aborted = takeoffThrustIsSet() and groundSpeed() > 10 and (FSL.getThrustLeversPos(1) == "IDLE" and FSL.getThrustLeversPos(2) == "IDLE") or (FSL.getThrustLeversPos(1) == "REV_IDLE" and FSL.getThrustLeversPos(2) == "REV_IDLE") or (FSL.getThrustLeversPos(1) == "REV_MAX" and FSL.getThrustLeversPos(2) == "REV_MAX")
+         local aborted = self.takeoffThrustWasSet and groundSpeed() > 10 and (FSL.getThrustLeversPos() == "IDLE" or reverseSelected())
          if aborted then
+            self.takeoffThrustWasSet = false
             self.takeoffAbortedAtTime = ipc.elapsedtime()
             self.cancelCountDownStart = nil
             return true 
@@ -188,6 +214,7 @@ local callouts = {
          elseif ipc.elapsedtime() - self.cancelCountDownStart > waitUntilCancel then
             log("Cancelling the takeoff logic because the thrust levers were moved back for longer than " .. waitUntilCancel / 1000 .. " seconds")
             self.cancelCountDownStart = nil
+            self.takeoffThrustWasSet = false
             return true
          end
       elseif self.cancelCountDownStart then self.cancelCountDownStart = nil end
@@ -197,14 +224,7 @@ local callouts = {
 
       while not thrustLeversSetForTakeoff() do restingLoop() end
 
-      FSL.PED_MCDU_KEY_PERF()
-      ipc.sleep(500)
-      local V1Select = tonumber(FSL.MCDU.getDisplay(PM,49,51))
-      local VrSelect = tonumber(FSL.MCDU.getDisplay(PM,97,99))
-      ipc.sleep(1000)
-      FSL.PED_MCDU_KEY_FPLN()
-      if not V1Select then log("V1 hasn't been entered") end
-      if not VrSelect then log("Vr hasn't been entered") end
+      local V1Select, VrSelect = getTakeoffSpeedsFromMCDU()
 
       repeat
          if self:takeoffCancelled() then return false end
@@ -240,6 +260,7 @@ local callouts = {
    rollout = function(self)
       if self.landedAtTime then repeat criticalLoop() until self:spoilers() end
       repeat criticalLoop() until self:reverseGreen()
+      self.reverseFuncEndedAtTime = ipc.elapsedtime()
       if groundSpeed() > 70 then repeat criticalLoop() until self:decel() end
       repeat criticalLoop() until self:seventy()
    end,
@@ -248,6 +269,7 @@ local callouts = {
       local thrustSet, skipThis
       if ALT() < 10 and takeoffThrustIsSet() then
          thrustSet = true
+         self.takeoffThrustWasSet = true
          ipc.sleep(800) -- wait for further spool up
          play("thrustSet")
          log("Thrust set")
@@ -274,7 +296,7 @@ local callouts = {
       if ALT() < 10 and IAS() >= V1Select then
          V1 = true
          ipc.sleep(PFD_delay)
-         play("v1", 900)
+         play("v1", 700)
          log("reached V1")
       end
       return V1
@@ -306,38 +328,39 @@ local callouts = {
    end,
 
    spoilers = function(self)
-      local spoilers_left = ipc.readLvar("FSLA320_spoiler_l_2") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_l_3") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_l_4") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_l_5") > spoilersDeployedThreshold
-      local spoilers_right = ipc.readLvar("FSLA320_spoiler_r_2") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_r_3") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_r_4") > spoilersDeployedThreshold and ipc.readLvar("FSLA320_spoiler_r_5") > spoilersDeployedThreshold
+      local spoilers_left = readLvar("FSLA320_spoiler_l_1") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_l_2") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_l_3") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_l_4") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_l_5") > spoilersDeployedThreshold
+      local spoilers_right = readLvar("FSLA320_spoiler_r_1") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_r_2") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_r_3") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_r_4") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_r_5") > spoilersDeployedThreshold
       local spoilers = spoilers_left and spoilers_right
       local noSpoilers
       if not spoilers and onGround() and timePassedSince(self.landedAtTime) > 5000 then 
          noSpoilers = true
+         log("spoilers didn't deploy :(") 
       end
-      if noSpoilers then log("spoilers didn't deploy :(") 
-      elseif spoilers then
+      if spoilers then
          log("spoilers deployed") 
          ipc.sleep(ECAM_delay + reactionTime)
+         if prob(0.1) then ipc.sleep(plusminus(500)) end
          play("spoilers",900)
       end
-      return spoilers or noSpoilers
+      return spoilers or noSpoilers or self:doingCircuits()
    end,
 
    reverseGreen = function(self)
-      local reverseGreen = ipc.readLvar("FSLA320_reverser_left") >= reverserDoorThreshold and ipc.readLvar("FSLA320_reverser_right") >= reverserDoorThreshold
-      local noReverse
+      local reverseGreen = readLvar("FSLA320_reverser_left") >= reverserDoorThreshold and readLvar("FSLA320_reverser_right") >= reverserDoorThreshold
+      local noReverse = (not reverseGreen and self.reverseSelectedAtTime and timePassedSince(self.reverseSelectedAtTime) > 5000) or groundSpeed() < 100
       if reverseSelected() and not self.reverseSelectedAtTime then 
          self.reverseSelectedAtTime = ipc.elapsedtime() 
-      end
-      if self.reverseSelectedAtTime and not reverseGreen and timePassedSince(self.reverseSelectedAtTime) > 5000 then
-         noReverse = true
-         log("reverse isn't green :(")
       end
       if reverseGreen then
          log("reverse is green")
          ipc.sleep(ECAM_delay + reactionTime)
+         if prob(0.1) then ipc.sleep(plusminus(500)) end
          play("reverseGreen",900)
+      elseif noReverse then
+         noReverse = true
+         log("reverse isn't green :(")
       end
-      return reverseGreen or noReverse
+      return reverseGreen or noReverse or self:doingCircuits()
    end,
 
    decel = function(self)
@@ -347,24 +370,26 @@ local callouts = {
       if decel then
          decel = true
          log("decel")
-         ipc.sleep(ECAM_delay + reactionTime)
+         ipc.sleep(plusminus(1200))
+         if prob(0.1) then ipc.sleep(plusminus(500)) end
          play("decel",600)
-      elseif timePassedSince(self.landedAtTime or self.takeoffAbortedAtTime) > 10000 then
+      elseif (timePassedSince(self.reverseFuncEndedAtTime) > 5000) or groundSpeed() < 70 then
          noDecel = true
-         log("no decel")
+         log("no decel :(")
       end
-      return decel or noDecel
+      return decel or noDecel or self:doingCircuits()
    end,
 
    seventy = function(self)
       local seventy
       if groundSpeed() <= 70 then
          seventy = true
-         ipc.sleep(ECAM_delay + reactionTime)
+         ipc.sleep(plusminus(200))
+         if prob(0.05) then ipc.sleep(plusminus(200)) end
          play("seventy")
-         log("reached 70 kts")
+         log("reached 70 knots")
       end
-      return seventy
+      return seventy or self:doingCircuits()
    end,
 
    brakeCheck = function(self)
@@ -378,17 +403,21 @@ local callouts = {
 
          local leftBrakeApp = ipc.readUW(0x0BC4) * 100 / 16383
          local rightBrakeApp = ipc.readUW(0x0BC6) * 100 / 16383
-         local leftPressure = ipc.readLvar("VC_MIP_BrkPress_L")
-         local rightPressure = ipc.readLvar("VC_MIP_BrkPress_R")
-         local pushback = ipc.readLvar("FSLA320_NWS_Pin") == 1
+         local leftPressure = readLvar("VC_MIP_BrkPress_L")
+         local rightPressure = readLvar("VC_MIP_BrkPress_R")
+         local pushback = readLvar("FSLA320_NWS_Pin") == 1
          local brakeAppThreshold = 1
          local brakesChecked
 
          if not pushback and groundSpeed() > 0.5 and leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
             ipc.sleep(2000)
-            if leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold and leftPressure == 0 and rightPressure == 0 then
-               play("pressureZero")
-               brakesChecked = true
+            if leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
+               if leftPressure == 0 and rightPressure == 0 then
+                  play("pressureZero")
+                  brakesChecked = true
+               elseif leftPressure > 0 or rightPressure > 0 then
+                  return
+               end
             end
          end
 
@@ -397,6 +426,7 @@ local callouts = {
       until brakesChecked
 
       ipc.set("brakesChecked",1)
+      self.brakesChecked = true
 
    end
 }
@@ -407,6 +437,11 @@ callouts.flightControlsCheck = {
    aileronTolerance = 300,
    spoilerTolerance = 100,
    rudderTolerance = 100,
+
+   randomDelay = function()
+      ipc.sleep(plusminus(150))
+      if prob(0.2) then ipc.sleep(100) end
+   end,
 
    __call = function(self)
 
@@ -422,27 +457,31 @@ callouts.flightControlsCheck = {
          -- full left aileron
          if not fullLeft and not ((fullUp or fullDown) and not yNeutral) and self:fullLeft() then
             ipc.sleep(ECAM_delay)
-            play("fullLeft1")
+            self.randomDelay()
+            play("fullLeft_1")
             fullLeft = true
          end
 
          -- full right aileron
          if not fullRight and not ((fullUp or fullDown) and not yNeutral) and self:fullRight() then
             ipc.sleep(ECAM_delay)
-            play("fullRight1")
+            self.randomDelay()
+            play("fullRight_1")
             fullRight = true
          end
 
          -- neutral after full left and full right aileron
          if fullLeft and fullRight and not xNeutral and self:stickNeutral() then
             ipc.sleep(ECAM_delay)
-            play("neutral1")
+            self.randomDelay()
+            play("neutral_1")
             xNeutral = true
          end
 
          -- full up
          if not fullUp and not ((fullLeft or fullRight) and not xNeutral) and self:fullUp() then
             ipc.sleep(ECAM_delay)
+            self.randomDelay()
             play("fullUp")
             fullUp = true
          end
@@ -450,6 +489,7 @@ callouts.flightControlsCheck = {
          -- full down
          if not fullDown and not ((fullLeft or fullRight) and not xNeutral) and self:fullDown() then
             ipc.sleep(ECAM_delay)
+            self.randomDelay()
             play("fullDown")
             fullDown = true
          end
@@ -457,28 +497,32 @@ callouts.flightControlsCheck = {
          -- neutral after full up and full down
          if fullUp and fullDown and not yNeutral and self:stickNeutral() then
             ipc.sleep(ECAM_delay)
-            play("neutral2")
+            self.randomDelay()
+            play("neutral_2")
             yNeutral = true
          end
 
          -- full left rudder
          if not fullLeftRud and xNeutral and yNeutral and self:fullLeftRud() then
             ipc.sleep(ECAM_delay)
-            play("fullLeft2")
+            self.randomDelay()
+            play("fullLeft_2")
             fullLeftRud = true
          end
 
          -- full right rudder
          if not fullRightRud and xNeutral and yNeutral and self:fullRightRud() then
             ipc.sleep(ECAM_delay)
-            play("fullRight2")
+            self.randomDelay()
+            play("fullRight_2")
             fullRightRud = true
          end
 
          -- neutral after full left and full right rudder
          if fullLeftRud and fullRightRud and not rudNeutral and self:rudNeutral() then
             ipc.sleep(ECAM_delay)
-            play("neutral3")
+            self.randomDelay()
+            play("neutral_3")
             rudNeutral = true
          end
 
@@ -488,83 +532,84 @@ callouts.flightControlsCheck = {
 
       until xNeutral and yNeutral and rudNeutral
 
+      self.flightControlsChecked = true
       ipc.set("flightControlsChecked",1)
    end,
 
    fullLeft = function(self)
       local aileronLeft
-      if ipc.readLvar("FSLA320_flap_l_1") == 0 then
-         aileronLeft = ipc.readLvar("FSLA320_aileron_l") <= 1499 and 1499 - ipc.readLvar("FSLA320_aileron_l") < self.aileronTolerance
-      elseif ipc.readLvar("FSLA320_flap_l_1") > 0 then
-         aileronLeft = ipc.readLvar("FSLA320_aileron_l") <= 1199 and 1199 - ipc.readLvar("FSLA320_aileron_l") < self.aileronTolerance
+      if readLvar("FSLA320_flap_l_1") == 0 then
+         aileronLeft = readLvar("FSLA320_aileron_l") <= 1499 and 1499 - readLvar("FSLA320_aileron_l") < self.aileronTolerance
+      elseif readLvar("FSLA320_flap_l_1") > 0 then
+         aileronLeft = readLvar("FSLA320_aileron_l") <= 1199 and 1199 - readLvar("FSLA320_aileron_l") < self.aileronTolerance
       end
       return
       aileronLeft and
-      1500 - ipc.readLvar("FSLA320_spoiler_l_2") < self.spoilerTolerance and
-      1500 - ipc.readLvar("FSLA320_spoiler_l_3") < self.spoilerTolerance and
-      1500 - ipc.readLvar("FSLA320_spoiler_l_4") < self.spoilerTolerance and
-      1500 - ipc.readLvar("FSLA320_spoiler_l_5") < self.spoilerTolerance
+      1500 - readLvar("FSLA320_spoiler_l_2") < self.spoilerTolerance and
+      1500 - readLvar("FSLA320_spoiler_l_3") < self.spoilerTolerance and
+      1500 - readLvar("FSLA320_spoiler_l_4") < self.spoilerTolerance and
+      1500 - readLvar("FSLA320_spoiler_l_5") < self.spoilerTolerance
    end,
 
    fullRight = function(self)
       local aileronRight
-      if ipc.readLvar("FSLA320_flap_l_1") == 0 then
-         aileronRight = 3000 - ipc.readLvar("FSLA320_aileron_r") < self.aileronTolerance
-      elseif ipc.readLvar("FSLA320_flap_l_1") > 0 then
-         aileronRight = 2700 - ipc.readLvar("FSLA320_aileron_r") < self.aileronTolerance
+      if readLvar("FSLA320_flap_l_1") == 0 then
+         aileronRight = 3000 - readLvar("FSLA320_aileron_r") < self.aileronTolerance
+      elseif readLvar("FSLA320_flap_l_1") > 0 then
+         aileronRight = 2700 - readLvar("FSLA320_aileron_r") < self.aileronTolerance
       end
       return
       aileronRight and
-      1500 - ipc.readLvar("FSLA320_spoiler_r_2") < self.spoilerTolerance and
-      1500 - ipc.readLvar("FSLA320_spoiler_r_3") < self.spoilerTolerance and
-      1500 - ipc.readLvar("FSLA320_spoiler_r_4") < self.spoilerTolerance and
-      1500 - ipc.readLvar("FSLA320_spoiler_r_5") < self.spoilerTolerance
+      1500 - readLvar("FSLA320_spoiler_r_2") < self.spoilerTolerance and
+      1500 - readLvar("FSLA320_spoiler_r_3") < self.spoilerTolerance and
+      1500 - readLvar("FSLA320_spoiler_r_4") < self.spoilerTolerance and
+      1500 - readLvar("FSLA320_spoiler_r_5") < self.spoilerTolerance
    end,
 
    fullUp = function(self)
       return
-      ipc.readLvar("FSLA320_elevator_l") <= 1499 and 1499 - ipc.readLvar("FSLA320_elevator_l") < self.elevatorTolerance and
-      ipc.readLvar("FSLA320_elevator_r") <= 1499 and 1499 - ipc.readLvar("FSLA320_elevator_r") < self.elevatorTolerance
+      readLvar("FSLA320_elevator_l") <= 1499 and 1499 - readLvar("FSLA320_elevator_l") < self.elevatorTolerance and
+      readLvar("FSLA320_elevator_r") <= 1499 and 1499 - readLvar("FSLA320_elevator_r") < self.elevatorTolerance
    end,
 
    fullDown = function(self)
       return
-      3000 - ipc.readLvar("FSLA320_elevator_l") < self.elevatorTolerance and
-      3000 - ipc.readLvar("FSLA320_elevator_r") < self.elevatorTolerance
+      3000 - readLvar("FSLA320_elevator_l") < self.elevatorTolerance and
+      3000 - readLvar("FSLA320_elevator_r") < self.elevatorTolerance
    end,
 
    fullLeftRud = function(self)
-      return ipc.readLvar("FSLA320_rudder") < 1500 and 1500 - ipc.readLvar("FSLA320_rudder") < self.rudderTolerance
+      return readLvar("FSLA320_rudder") < 1500 and 1500 - readLvar("FSLA320_rudder") < self.rudderTolerance
    end,
 
    fullRightRud = function(self)
-      return 3000 - ipc.readLvar("FSLA320_rudder") < self.rudderTolerance
+      return 3000 - readLvar("FSLA320_rudder") < self.rudderTolerance
    end,
 
    stickNeutral = function(self)
       local aileronsNeutral
-      if ipc.readLvar("FSLA320_flap_l_1") == 0 then
-         aileronsNeutral = (ipc.readLvar("FSLA320_aileron_l") < self.aileronTolerance or (ipc.readLvar("FSLA320_aileron_l") >= 1500 and ipc.readLvar("FSLA320_aileron_l") - 1500 < self.aileronTolerance)) and
-                           (ipc.readLvar("FSLA320_aileron_r") < self.aileronTolerance or (ipc.readLvar("FSLA320_aileron_r") >= 1500 and ipc.readLvar("FSLA320_aileron_r") - 1500 < self.aileronTolerance))
-      elseif ipc.readLvar("FSLA320_flap_l_1") > 0 then
-         aileronsNeutral = math.abs(ipc.readLvar("FSLA320_aileron_l") - 1980) < self.aileronTolerance and math.abs(ipc.readLvar("FSLA320_aileron_r") - 480) < self.aileronTolerance
+      if readLvar("FSLA320_flap_l_1") == 0 then
+         aileronsNeutral = (readLvar("FSLA320_aileron_l") < self.aileronTolerance or (readLvar("FSLA320_aileron_l") >= 1500 and readLvar("FSLA320_aileron_l") - 1500 < self.aileronTolerance)) and
+                           (readLvar("FSLA320_aileron_r") < self.aileronTolerance or (readLvar("FSLA320_aileron_r") >= 1500 and readLvar("FSLA320_aileron_r") - 1500 < self.aileronTolerance))
+      elseif readLvar("FSLA320_flap_l_1") > 0 then
+         aileronsNeutral = math.abs(readLvar("FSLA320_aileron_l") - 1980) < self.aileronTolerance and math.abs(readLvar("FSLA320_aileron_r") - 480) < self.aileronTolerance
       end
       return
       aileronsNeutral and
-      ipc.readLvar("FSLA320_spoiler_l_2") < self.spoilerTolerance and
-      ipc.readLvar("FSLA320_spoiler_l_3") < self.spoilerTolerance and
-      ipc.readLvar("FSLA320_spoiler_l_4") < self.spoilerTolerance and
-      ipc.readLvar("FSLA320_spoiler_l_5") < self.spoilerTolerance and
-      ipc.readLvar("FSLA320_spoiler_r_2") < self.spoilerTolerance and
-      ipc.readLvar("FSLA320_spoiler_r_3") < self.spoilerTolerance and
-      ipc.readLvar("FSLA320_spoiler_r_4") < self.spoilerTolerance and
-      ipc.readLvar("FSLA320_spoiler_r_5") < self.spoilerTolerance and
-      (ipc.readLvar("FSLA320_elevator_l") < self.elevatorTolerance or (ipc.readLvar("FSLA320_elevator_l") >= 1500 and ipc.readLvar("FSLA320_elevator_l") - 1500 < self.elevatorTolerance)) and
-      (ipc.readLvar("FSLA320_elevator_r") < self.elevatorTolerance or (ipc.readLvar("FSLA320_elevator_r") >= 1500 and ipc.readLvar("FSLA320_elevator_r") - 1500 < self.elevatorTolerance))
+      readLvar("FSLA320_spoiler_l_2") < self.spoilerTolerance and
+      readLvar("FSLA320_spoiler_l_3") < self.spoilerTolerance and
+      readLvar("FSLA320_spoiler_l_4") < self.spoilerTolerance and
+      readLvar("FSLA320_spoiler_l_5") < self.spoilerTolerance and
+      readLvar("FSLA320_spoiler_r_2") < self.spoilerTolerance and
+      readLvar("FSLA320_spoiler_r_3") < self.spoilerTolerance and
+      readLvar("FSLA320_spoiler_r_4") < self.spoilerTolerance and
+      readLvar("FSLA320_spoiler_r_5") < self.spoilerTolerance and
+      (readLvar("FSLA320_elevator_l") < self.elevatorTolerance or (readLvar("FSLA320_elevator_l") >= 1500 and readLvar("FSLA320_elevator_l") - 1500 < self.elevatorTolerance)) and
+      (readLvar("FSLA320_elevator_r") < self.elevatorTolerance or (readLvar("FSLA320_elevator_r") >= 1500 and readLvar("FSLA320_elevator_r") - 1500 < self.elevatorTolerance))
    end,
 
    rudNeutral = function(self)
-      return (ipc.readLvar("FSLA320_rudder") < self.rudderTolerance or (ipc.readLvar("FSLA320_rudder") >= 1500 and ipc.readLvar("FSLA320_rudder") - 1500 < self.rudderTolerance))
+      return (readLvar("FSLA320_rudder") < self.rudderTolerance or (readLvar("FSLA320_rudder") >= 1500 and readLvar("FSLA320_rudder") - 1500 < self.rudderTolerance))
    end
 }
 
