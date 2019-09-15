@@ -44,6 +44,7 @@ pilot = PM
 noPauses = true
 local FSL = require("FSL")
 local readLvar = ipc.readLvar
+local currTime = ipc.elapsedtime
 
 local sound_path = "..\\Modules\\PMCO_Sounds\\" 
 local loopCycleCritical = 100
@@ -56,6 +57,8 @@ local reverserDoorThreshold = 90
 local spoilersDeployedThreshold = 200
 local previousCalloutEndTime
 local reactionTime = 300
+local logging = true
+local firstRun = true
 
 -- Logging ------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
@@ -63,7 +66,8 @@ local reactionTime = 300
 local logname = "Pilot Monitoring Callouts.log"
 io.open(logname,"w"):close()
 
-function log(str)
+function log(str,onlyMsg) -- Calling this function from a coroutine results in a crash
+   if not logging then return end
    local file = io.open(logname,"a")
    io.input(file)
    io.output(file)
@@ -79,6 +83,7 @@ function log(str)
    end
    local timestamp = "[" .. temp.hour .. ":" .. temp.min .. ":" .. temp.sec .. "] - "
    local prefix = "PMCO: "
+   if onlyMsg then timestamp = "" prefix = "" end
    ipc.log(prefix .. timestamp .. str)
    io.write(timestamp .. str .. "\n")
    io.close(file)
@@ -93,7 +98,7 @@ function onGround() return ipc.readUB(0x0366) == 1 end
 function groundSpeed() return ipc.readUD(0x02B4) / 65536 * 3600 / 1852 end
 function ALT() return ipc.readUD(0x31E4) / 65536 end
 function IAS() return ipc.readUW(0x02BC) / 128 end
-function timePassedSince(ref) return ipc.elapsedtime() - ref end
+function timePassedSince(ref) return currTime() - ref end
 function reverseSelected() return readLvar("VC_PED_TL_1") > 100 and readLvar("VC_PED_TL_2") > 100 end
 
 function thrustLeversSetForTakeoff()
@@ -126,58 +131,58 @@ function getTakeoffSpeedsFromMCDU()
 end
 
 function play(fileName,length)
-   if previousCalloutEndTime and previousCalloutEndTime - ipc.elapsedtime() > 0 then
-      ipc.sleep(previousCalloutEndTime - ipc.elapsedtime())
+   if previousCalloutEndTime and previousCalloutEndTime - currTime() > 0 then
+      ipc.sleep(previousCalloutEndTime - currTime())
    end
    sound.play(fileName,sound_device,volume)
-   if length then previousCalloutEndTime = ipc.elapsedtime() + length
+   if length then previousCalloutEndTime = currTime() + length
    else previousCalloutEndTime = nil end
 end
 
 local callouts = {
 
    init = function(self)
+      log("Initializing")
       self.airborne = not onGround()
-      self.brakesChecked = false
-      self.flightControlsChecked = false
+      self.skipChecks = onGround() and enginesRunning() and not firstRun
       self.takeoffAbortedAtTime = nil
       self.landedAtTime = nil
       self.reverseSelectedAtTime = nil
       self.reverseFuncEndedAtTime = nil
       ipc.set("brakesChecked", nil)
       ipc.set("flightControlsChecked", nil)
+      if firstRun then firstRun = false end
+      if self.skipChecks then log("Skipping flight controls and brake checks until the engines are shut down") end
    end,
 
    __call = function(self)
 
       if not self.falseTrigger then self:init() end
 
-      while onGround() and not thrustLeversSetForTakeoff() do
-         if self.skipChecks and not enginesRunning() then self.skipChecks = false end
-         restingLoop()
-      end
+      while onGround() and not enginesRunning() do restingLoop() end
 
       if onGround() and not self.skipChecks then
-         local flightControlsCheckOrSkip = coroutine.create(function() self:flightControlsCheck() end)
-         local brakeCheckOrSkip = coroutine.create(function() self:brakeCheck() end)
+         local co_flightControls = coroutine.create(function() self:flightControlsCheck() end)
+         local co_brakeCheck = coroutine.create(function() self:brakeCheck() end)
          repeat ipc.sleep(5)
-            local flightControlsCheckedOrSkipped = self.flightControlsChecked or not coroutine.resume(flightControlsCheckOrSkip)
-            local brakesCheckedOrSkipped = self.brakesChecked or not coroutine.resume(brakeCheckOrSkip)
+            local flightControlsCheckedOrSkipped = not coroutine.resume(co_flightControls)
+            local brakesCheckedOrSkipped = not coroutine.resume(co_brakeCheck)
          until flightControlsCheckedOrSkipped and brakesCheckedOrSkipped
       end
 
       if onGround() then
-         repeat 
-            local takeoff = self:takeoff()
-            local abortedTakeoff = not takeoff and self.takeoffAbortedAtTime
-            self.falseTrigger = not takeoff and not abortedTakeoff
-            if self.falseTrigger or not enginesRunning() then return end
+         while not thrustLeversSetForTakeoff() do
+            if not enginesRunning() then return end
             restingLoop()
-         until takeoff or abortedTakeoff
+         end
+         local tookOffOrAborted, enginesShutdown = self:takeoff()
+         self.falseTrigger = not tookOffOrAborted and not enginesShutdown
+         if self.falseTrigger or enginesShutdown then return end
       elseif self.circuit then
+         log("Doing circuits")
          repeat
             criticalLoop()
-            if self:positiveClimb() then self.circuit = false end
+            self.circuit = not self:positiveClimb()
          until not self.circuit
       end
 
@@ -186,16 +191,14 @@ local callouts = {
          if ALT() > 100 then restingLoop() else criticalLoop() end
       end
 
-      if self.airborne then self.landedAtTime = ipc.elapsedtime() end
+      if self.airborne then self.landedAtTime = currTime() end
 
       if groundSpeed() > 60 then self:rollout() end
-
-      self.skipChecks = true
 
    end,
 
    doingCircuits = function(self)
-      self.circuit = thrustLeversSetForTakeoff() and not onGround() 
+      self.circuit = thrustLeversSetForTakeoff() and not onGround()
       return self.circuit
    end,
 
@@ -204,14 +207,15 @@ local callouts = {
       if not thrustLeversSetForTakeoff() then
          local aborted = self.takeoffThrustWasSet and groundSpeed() > 10 and (FSL.getThrustLeversPos() == "IDLE" or reverseSelected())
          if aborted then
+            log("Takeoff aborted")
             self.takeoffThrustWasSet = false
-            self.takeoffAbortedAtTime = ipc.elapsedtime()
             self.cancelCountDownStart = nil
-            return true 
+            self.takeoffAbortedAtTime = currTime()
+            return false, true 
          end
          if not self.cancelCountDownStart then
-            self.cancelCountDownStart = ipc.elapsedtime()
-         elseif ipc.elapsedtime() - self.cancelCountDownStart > waitUntilCancel then
+            self.cancelCountDownStart = currTime()
+         elseif currTime() - self.cancelCountDownStart > waitUntilCancel then
             log("Cancelling the takeoff logic because the thrust levers were moved back for longer than " .. waitUntilCancel / 1000 .. " seconds")
             self.cancelCountDownStart = nil
             self.takeoffThrustWasSet = false
@@ -222,34 +226,49 @@ local callouts = {
 
    takeoff = function(self)
 
-      while not thrustLeversSetForTakeoff() do restingLoop() end
+      log("Takeoff")
 
       local V1Select, VrSelect = getTakeoffSpeedsFromMCDU()
 
       repeat
-         if self:takeoffCancelled() then return false end
+         local falseTrigger, aborted = self:takeoffCancelled()
+         if falseTrigger then return false
+         elseif aborted then return true
+         elseif not enginesRunning() then return nil, true end
          criticalLoop()
       until self:thrustSet()
 
       repeat
-         if self:takeoffCancelled() then return false end
+         local falseTrigger, aborted = self:takeoffCancelled()
+         if falseTrigger then return false
+         elseif aborted then return true
+         elseif not enginesRunning() then return nil, true end
          criticalLoop()
       until self:oneHundred()
 
       if play_V1 == 1 then
          repeat
-            if self:takeoffCancelled() then return false end
+            local falseTrigger, aborted = self:takeoffCancelled()
+            if falseTrigger then return false
+            elseif aborted then return true
+            elseif not enginesRunning() then return nil, true end
             criticalLoop()
          until self:V1(V1Select)
       end
 
       repeat
-         if self:takeoffCancelled() then return false end
+         local falseTrigger, aborted = self:takeoffCancelled()
+         if falseTrigger then return false
+         elseif aborted then return true
+         elseif not enginesRunning() then return nil, true end
          criticalLoop()
       until self:rotate(VrSelect)
 
       repeat
-         if self:takeoffCancelled() then return false end
+         local falseTrigger, aborted = self:takeoffCancelled()
+         if falseTrigger then return false
+         elseif aborted then return true
+         elseif not enginesRunning() then return nil, true end
          criticalLoop()
       until self:positiveClimb()
 
@@ -258,71 +277,69 @@ local callouts = {
    end,
 
    rollout = function(self)
-      if self.landedAtTime then repeat criticalLoop() until self:spoilers() end
+      if not self.takeoffAbortedAtTime then repeat criticalLoop() until self:spoilers() end
       repeat criticalLoop() until self:reverseGreen()
-      self.reverseFuncEndedAtTime = ipc.elapsedtime()
+      self.reverseFuncEndedAtTime = currTime()
       if groundSpeed() > 70 then repeat criticalLoop() until self:decel() end
       repeat criticalLoop() until self:seventy()
    end,
 
    thrustSet = function(self)
-      local thrustSet, skipThis
-      if ALT() < 10 and takeoffThrustIsSet() then
-         thrustSet = true
+      local thrustSet = ALT() < 10 and takeoffThrustIsSet()
+      local skipThis = not thrustSet and IAS() > 80
+      if thrustSet then
          self.takeoffThrustWasSet = true
          ipc.sleep(800) -- wait for further spool up
          play("thrustSet")
          log("Thrust set")
-      elseif IAS() > 80 then
-         skipThis = true
-         log("thrust set skipped (IAS > 80 kts)")
+      elseif skipThis then
+         log("Thrust set skipped (IAS > 80 kts)")
       end
       return thrustSet or skipThis
    end,
 
    oneHundred = function(self)
-      local oneHundred
-      if ALT() < 10 and IAS() >= 100 then
-         oneHundred = true
+      local oneHundred = ALT() < 10 and IAS() >= 100
+      if oneHundred then
          ipc.sleep(PFD_delay)
          play("oneHundred")
-         log("reached 100 kts")
+         log("Reached 100 kts")
       end
       return oneHundred
    end,
 
    V1 = function(self,V1Select)
-      local V1
-      if ALT() < 10 and IAS() >= V1Select then
-         V1 = true
+      if not V1Select then return true end
+      local V1 = ALT() < 10 and IAS() >= V1Select
+      if V1 then
          ipc.sleep(PFD_delay)
          play("v1", 700)
-         log("reached V1")
+         log("Reached V1")
       end
       return V1
    end,
 
    rotate = function(self,VrSelect)
-      local rotate
-      if ALT() < 10 and IAS() >= VrSelect then
-         rotate = true
+      if not VrSelect then return true end
+      local rotate = ALT() < 10 and IAS() >= VrSelect
+      if rotate then
          ipc.sleep(PFD_delay)
          play("rotate")
-         log("reached Vr")
+         log("Reached Vr")
       end
       return rotate
    end,
 
    positiveClimb = function(self)
-      local positiveClimb, skipThis
-      local vertSpeed = ipc.readSW(0x02C8) * 60 * 3.28084 / 256
-      if ALT() >= 10 and vertSpeed >= 500 then
-         positiveClimb = true
+      local verticalSpeed = ipc.readSW(0x02C8) * 60 * 3.28084 / 256
+      local positiveClimb = ALT() >= 10 and verticalSpeed >= 500
+      local skipThis = not positiveClimb and ALT() > 150.0
+      if positiveClimb then
          play("positiveClimb")
-         log("reached positive climb")
-      elseif ALT() > 150.0 then -- skip criterium: 150m / 500ft
+         log("Reached positive climb")
+      elseif skipThis then
          skipThis = true
-         log("positive climb skipped (ALT > 500ft)")
+         log("Positive climb skipped (ALT > 500ft)")
       end
       return positiveClimb or skipThis
    end,
@@ -331,16 +348,14 @@ local callouts = {
       local spoilers_left = readLvar("FSLA320_spoiler_l_1") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_l_2") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_l_3") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_l_4") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_l_5") > spoilersDeployedThreshold
       local spoilers_right = readLvar("FSLA320_spoiler_r_1") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_r_2") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_r_3") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_r_4") > spoilersDeployedThreshold and readLvar("FSLA320_spoiler_r_5") > spoilersDeployedThreshold
       local spoilers = spoilers_left and spoilers_right
-      local noSpoilers
-      if not spoilers and onGround() and timePassedSince(self.landedAtTime) > 5000 then 
-         noSpoilers = true
-         log("spoilers didn't deploy :(") 
-      end
+      local noSpoilers = not spoilers and onGround() and timePassedSince(self.landedAtTime) > 5000
       if spoilers then
-         log("spoilers deployed") 
+         log("Spoilers deployed") 
          ipc.sleep(ECAM_delay + reactionTime)
          if prob(0.1) then ipc.sleep(plusminus(500)) end
          play("spoilers",900)
+      elseif noSpoilers then
+         log("Spoilers didn't deploy :(")
       end
       return spoilers or noSpoilers or self:doingCircuits()
    end,
@@ -349,16 +364,16 @@ local callouts = {
       local reverseGreen = readLvar("FSLA320_reverser_left") >= reverserDoorThreshold and readLvar("FSLA320_reverser_right") >= reverserDoorThreshold
       local noReverse = (not reverseGreen and self.reverseSelectedAtTime and timePassedSince(self.reverseSelectedAtTime) > 5000) or groundSpeed() < 100
       if reverseSelected() and not self.reverseSelectedAtTime then 
-         self.reverseSelectedAtTime = ipc.elapsedtime() 
+         self.reverseSelectedAtTime = currTime() 
       end
       if reverseGreen then
-         log("reverse is green")
+         log("Reverse is green")
          ipc.sleep(ECAM_delay + reactionTime)
          if prob(0.1) then ipc.sleep(plusminus(500)) end
          play("reverseGreen",900)
       elseif noReverse then
          noReverse = true
-         log("reverse isn't green :(")
+         log("Reverse isn't green :(")
       end
       return reverseGreen or noReverse or self:doingCircuits()
    end,
@@ -367,27 +382,25 @@ local callouts = {
       local noDecel
       local accelLateral = ipc.readDBL(0x3070)
       local decel = accelLateral < -4
+      local noDecel = not decel and (timePassedSince(self.reverseFuncEndedAtTime) > 5000) or groundSpeed() < 70
       if decel then
-         decel = true
-         log("decel")
+         log("Decel")
          ipc.sleep(plusminus(1200))
          if prob(0.1) then ipc.sleep(plusminus(500)) end
          play("decel",600)
-      elseif (timePassedSince(self.reverseFuncEndedAtTime) > 5000) or groundSpeed() < 70 then
-         noDecel = true
-         log("no decel :(")
+      elseif noDecel then
+         log("No decel :(")
       end
       return decel or noDecel or self:doingCircuits()
    end,
 
    seventy = function(self)
-      local seventy
-      if groundSpeed() <= 70 then
-         seventy = true
+      local seventy = groundSpeed() <= 70
+      if seventy then
          ipc.sleep(plusminus(200))
          if prob(0.05) then ipc.sleep(plusminus(200)) end
          play("seventy")
-         log("reached 70 knots")
+         log("70 knots")
       end
       return seventy or self:doingCircuits()
    end,
@@ -427,7 +440,6 @@ local callouts = {
 
       ipc.set("brakesChecked",1)
       self.brakesChecked = true
-
    end
 }
 
@@ -647,9 +659,11 @@ do
    else
       play_V1 = "No"
    end
-   log(">>>>>> script started <<<<<<")
-   log("user option 'Play V1 callout': " .. play_V1)
-   log("user option 'Pilot Monitoring': " .. PM)
+   log(">>>>>> Script started <<<<<<")
+   log("Play V1 callout: " .. play_V1)
+   log("Pilot Monitoring: " .. PM)
+   log("----------------------------------------------------------------------------------------",1)
+   log("----------------------------------------------------------------------------------------",1)
    local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. play_V1 .. "\n\nCallouts volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM
    if show_startup_message == 1 then ipc.display(msg,20) end
 end

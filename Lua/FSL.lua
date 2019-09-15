@@ -9,7 +9,7 @@ local pilot = pilot
 local human = human or true
 local noPauses = noPauses or false
 if not pilot then human = false end
-local logging = true
+local logging = false
 
 -- Logging ------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
