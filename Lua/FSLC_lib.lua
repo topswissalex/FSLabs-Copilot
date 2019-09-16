@@ -14,7 +14,7 @@ local logging = false
 -- Logging ------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
-local logname = "Lua\\FSL\\FSL.log"
+local logname = "Lua\\FSLC_lib\\FSL.log"
 io.open(logname,"w"):close()
 
 function FSL_log(str, drawline, notimestamp)
@@ -47,7 +47,7 @@ end
 -- Some housekeeping of the raw controls data -------------------------------------------
 -----------------------------------------------------------------------------------------
 
-local file = io.open("Lua\\FSL\\FSL.json")
+local file = io.open("Lua\\FSLC_lib\\FSL.json")
 io.input(file)
 FSL.control = json.parse(io.read())
 

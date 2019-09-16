@@ -16,30 +16,30 @@ end
 
 function afterStartSequence()
    FSL.PED_SPD_BRK_LEVER("ARM")
-   FSL.setTakeoffFlaps() --first checks the ATSU log. if nothing is there, checks the MCDU PERF page.
-   repeat ipc.sleep(100) until ipc.readLvar("FSLA320_NWS_Pin") == 0 --added this because GSX messes with setting the trim during pushback
-   FSL.trimwheel:set() --sets the trim using the final loadsheet MACTOW from the ATSU log
+   FSL.setTakeoffFlaps() -- first checks the ATSU log. if nothing is there, checks the MCDU PERF page.
+   repeat ipc.sleep(100) until ipc.readLvar("FSLA320_NWS_Pin") == 0 -- because GSX messes with setting the trim during pushback
+   FSL.trimwheel:set() -- sets the trim using the final loadsheet MACTOW from the ATSU log
    hand:rest()
 end
 
 function waitForLineup()
-   local t_started_counting, counting
+   local startedCountingAtTime, count
    repeat
-      local val = FSL.OVHD_SIGNS_SeatBelts_Switch:getVar()
-      if pval and pval ~= val then
-         if not counting then 
-            counting = 0
-            t_started_counting = ipc.elapsedtime()
+      local switchPos = FSL.OVHD_SIGNS_SeatBelts_Switch:getVar()
+      if prevSwitchPos and prevSwitchPos ~= switchPos then
+         if not count then 
+            count = 0
+            startedCountingAtTime = ipc.elapsedtime()
           end
-         counting = counting + 1
+         count = count + 1
       end
-      if t_started_counting and ipc.elapsedtime() - t_started_counting > 2000 then
-         counting = false
+      if startedCountingAtTime and ipc.elapsedtime() - startedCountingAtTime > 2000 then
+         count = false
       end
-      pval = val
+      prevSwitchPos = switchPos
       ipc.sleep(100)
       if ipc.readUB(0x0366) == 1 then return true end
-   until counting == 4
+   until count == 4
    ipc.sleep(plusminus(2000))
    if prob(0.2) then ipc.sleep(plusminus(2000)) end
 end
