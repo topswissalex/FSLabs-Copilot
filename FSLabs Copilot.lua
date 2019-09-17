@@ -15,7 +15,7 @@ PM_announces_brake_check = 1 -- PM announces 'brake pressure zero' after the bra
 
 -- Actions:
 
-enable_actions = 1 -- allow the PM to perform the procedures that are listed below
+enable_actions = 0 -- allow the PM to perform the procedures that are listed below
 SOP = "default"
 
 -- Enable or disable individual procedures in the default SOP and change their related options:
@@ -90,7 +90,8 @@ end
 function enginesRunning()
    local eng1_N1 = ipc.readUW(0x0898) * 100 / 16384
    local eng2_N1 = ipc.readUW(0x0930) * 100 / 16384
-   return eng1_N1 > 15 and eng2_N1 > 15
+   if eng1_N1 > 15 and eng2_N1 > 15 then return true
+   elseif eng1_N1 < 15 and eng2_N1 < 15 then return false end
 end
 
 function takeoffThrustIsSet()
@@ -145,5 +146,5 @@ do
    log("----------------------------------------------------------------------------------------",1)
    log("----------------------------------------------------------------------------------------",1)
    local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. play_V1 .. "\n\nCallouts volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM
-   if show_startup_message == 1 then ipc.display(msg,20) end
+   if show_startup_message == 1 then ipc.display(msg,20) sleep(20000) end
 end

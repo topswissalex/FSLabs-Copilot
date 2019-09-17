@@ -21,37 +21,37 @@ local callouts = {
    init = function(self)
       if not self.firstRun then log("RESETTING") end
       self.airborne = not onGround()
-      self.skipChecks = onGround() and enginesRunning() and not self.firstRun
       self.takeoffAbortedAtTime = nil
       self.latestTouchdownAtTime = nil
       self.landedAtTime = nil
       self.noReverseTimeRef = nil
       self.noDecelTimeRef = nil
       self.reverseFuncEndedAtTime = nil
-      ipc.set("brakesChecked", nil)
-      ipc.set("flightControlsChecked", nil)
-      if self.skipChecks then log("Skipping flight controls and brake checks until the engines are shut down") end
+      self.brakesChecked = (onGround() and enginesRunning() and not self.firstRun) or false
+      self.flightControlsChecked = (onGround() and enginesRunning() and not self.firstRun) or false
+      if not self.brakesChecked then ipc.set("brakesChecked", nil) else ipc.set("brakesChecked", 1) end
+      if not self.flightControlsChecked then ipc.set("flightControlsChecked", nil) else ipc.set("flightControlsChecked", 1) end
    end,
 
    main = function(self)
 
       if not self.falseTrigger then self:init() end
 
-      while onGround() and not enginesRunning() do restingLoop() end
+      while onGround() and not enginesRunning() do sleep() end
 
-      if onGround() and not self.skipChecks then
+      if onGround() then
          local co_flightControlsCheck = coroutine.create(function() self:flightControlsCheck() end)
          local co_brakeCheck = coroutine.create(function() self:brakeCheck() end)
          repeat sleep(5)
-            local flightControlsCheckedOrSkipped = not coroutine.resume(co_flightControlsCheck)
-            local brakesCheckedOrSkipped = not coroutine.resume(co_brakeCheck)
+            local flightControlsCheckedOrSkipped = self.flightControlsChecked or not coroutine.resume(co_flightControlsCheck)
+            local brakesCheckedOrSkipped = self.brakesChecked or not coroutine.resume(co_brakeCheck)
          until flightControlsCheckedOrSkipped and brakesCheckedOrSkipped
       end
 
       if onGround() then
          while not thrustLeversSetForTakeoff() do
             if not enginesRunning() then return end
-            restingLoop()
+            sleep()
          end
          local tookOffOrAborted, enginesShutdown = self:takeoff()
          self.falseTrigger = not tookOffOrAborted and not enginesShutdown
@@ -59,14 +59,14 @@ local callouts = {
       elseif self.circuit then
          log("Doing circuits")
          repeat
-            criticalLoop()
+            sleep()
             self.circuit = not self:positiveClimb()
          until not self.circuit
       end
 
       while not onGround() do
          if not self.airborne then self.airborne = true end
-         if ALT() > 100 then restingLoop() else criticalLoop() end
+         sleep()
       end
 
       if self.airborne then self.latestTouchdownAtTime = currTime() end
@@ -115,7 +115,7 @@ local callouts = {
          if falseTrigger then return false
          elseif aborted then return true
          elseif not enginesRunning() then return nil, true end
-         criticalLoop()
+         sleep()
       until self:thrustSet()
 
       repeat
@@ -123,7 +123,7 @@ local callouts = {
          if falseTrigger then return false
          elseif aborted then return true
          elseif not enginesRunning() then return nil, true end
-         criticalLoop()
+         sleep()
       until self:oneHundred()
 
       if play_V1 == 1 then
@@ -132,7 +132,7 @@ local callouts = {
             if falseTrigger then return false
             elseif aborted then return true
             elseif not enginesRunning() then return nil, true end
-            criticalLoop()
+            sleep()
          until self:V1(V1Select)
       end
 
@@ -141,7 +141,7 @@ local callouts = {
          if falseTrigger then return false
          elseif aborted then return true
          elseif not enginesRunning() then return nil, true end
-         criticalLoop()
+         sleep()
       until self:rotate(VrSelect)
 
       repeat
@@ -149,7 +149,7 @@ local callouts = {
          if falseTrigger then return false
          elseif aborted then return true
          elseif not enginesRunning() then return nil, true end
-         criticalLoop()
+         sleep()
       until self:positiveClimb()
 
       return true
@@ -174,7 +174,7 @@ local callouts = {
          repeat
             if self:doingCircuits() then return end
             if not self.landedAtTime then self:checkIfLanded() end
-            criticalLoop()
+            sleep()
          until self:spoilers()
       else
          self.landedAtTime = self.takeoffAbortedAtTime 
@@ -184,23 +184,23 @@ local callouts = {
       repeat
          if self:doingCircuits() then return end
          if not self.landedAtTime then self:checkIfLanded() end
-         criticalLoop()
+         sleep()
       until self:reverseGreen()
 
       -- decel
       if groundSpeed() > 70 then 
-         while not self.landedAtTime do self:checkIfLanded() criticalLoop() end
+         while not self.landedAtTime do self:checkIfLanded() sleep() end
          self.noDecelTimeRef = currTime()
          repeat 
             if self:doingCircuits() then return end
-            criticalLoop() 
+            sleep() 
          until self:decel() 
       end
 
       -- seventy
       repeat 
          if self:doingCircuits() then return end
-         criticalLoop() 
+         sleep() 
       until self:seventy()
    end,
 
@@ -358,6 +358,7 @@ local callouts = {
          
       until brakesChecked
 
+      self.brakesChecked = true
       ipc.set("brakesChecked",1)
    end
 }
@@ -463,6 +464,7 @@ callouts.flightControlsCheck = {
 
       until xNeutral and yNeutral and rudNeutral
 
+      callouts.flightControlsChecked = true
       ipc.set("flightControlsChecked",1)
    end,
 
@@ -549,4 +551,5 @@ setmetatable(callouts.flightControlsCheck,callouts.flightControlsCheck)
 -----------------------------------------------------------------------------------------
 
 callouts.firstRun = true
+sleep(10000)
 while true do callouts:main() end
