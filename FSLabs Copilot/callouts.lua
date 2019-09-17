@@ -294,6 +294,13 @@ local callouts = {
       elseif noReverse then
          noReverse = true
          log("Reverse isn't green :(")
+         log("TL1 = " .. readLvar("VC_PED_TL_1"))
+         log("TL2 = " .. readLvar("VC_PED_TL_2"))
+         log("Left reverser = " .. readLvar("FSLA320_reverser_left"))
+         log("Right reverser = " .. readLvar("FSLA320_reverser_left"))
+         log("No reverse time reference: " .. self.noReverseTimeRef)
+         log("Time of landing: " .. self.landedAtTime)
+         log("Current time: " .. currTime())
       end
       return reverseGreen or noReverse
    end,
