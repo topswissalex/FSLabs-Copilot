@@ -21,6 +21,14 @@ function afterStartSequence()
    hand:rest()
 end
 
+function waitForChecksCompleted()
+   repeat sleep() coroutine.yield() until ipc.get("flightControlsChecked") and ipc.get("brakesChecked")
+end
+
+function taxi()
+   
+end
+
 function waitForLineup()
    local startedCountingAtTime
    local count = 0
@@ -106,30 +114,37 @@ function afterLandingCleanup()
 end
 
 function main()
+
    if onGround() then
+
       if after_start == 1 then
          waitForEnginesStarted()
          afterStartSequence()
       end
+
       if lineup == 1 then
          local skip = not waitForLineup() 
          if not skip then lineUpSequence() end
       end
+
       if takeoff == 1 then
          waitForTakeoff()
          takeoffSequence()
       end
+
       if after_takeoff == 1 then
          waitForClbThrust()
          sleep(plusminus(2000))
          afterTakeoffSequence()
       end
    end
+
    if after_landing == 1 then
       waitForAfterLanding()
       sleep(plusminus(5000,0.5))
       afterLandingCleanup()
    end
+
    repeat sleep() until not enginesRunning()
 end
 

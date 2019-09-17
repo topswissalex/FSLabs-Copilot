@@ -252,7 +252,7 @@ local FSL = {
    bird = function()
       local port = remote_port or "8080"
       local FCU = http.request("http://localhost:" .. port .. "/FCU/Display")
-      return FCU:find("HDG_VS_SEL\":false") ~= nil
+      return FCU:find("HDG_VS_SEL\":false")
    end,
 
    MCDU = {

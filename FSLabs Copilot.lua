@@ -129,24 +129,16 @@ sound.path(sound_path)
 
 if preventLoop then return end
 
-if enable_actions == 1 then
-   ipc.runlua("FSLabs Copilot\\SOP\\" .. SOP)
-end
+if enable_actions == 1 then ipc.runlua("FSLabs Copilot\\SOP\\" .. SOP) end
 ipc.runlua("FSLabs Copilot\\callouts")
 
 do
    local play_V1 = play_V1
    local PM = PM
-   if PM == 1 then
-      PM = "Captain"
-   else
-      PM = "First Officer"
-   end
-   if play_V1 == 1 then
-      play_V1 = "Yes"
-   else
-      play_V1 = "No"
-   end
+   if PM == 1 then PM = "Captain"
+   else PM = "First Officer" end
+   if play_V1 == 1 then play_V1 = "Yes"
+   else play_V1 = "No" end
    log(">>>>>> Script started <<<<<<")
    log("Play V1 callout: " .. play_V1)
    log("Pilot Monitoring: " .. PM)
