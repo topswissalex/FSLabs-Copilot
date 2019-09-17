@@ -282,7 +282,7 @@ local callouts = {
 
    reverseGreen = function(self)
       local reverseGreen = readLvar("FSLA320_reverser_left") >= reverserDoorThreshold and readLvar("FSLA320_reverser_right") >= reverserDoorThreshold
-      local noReverse = (not reverseGreen and self.noReverseTimeRef and timePassedSince(self.noReverseTimeRef) > plusminus(1500)) or groundSpeed() < 100
+      local noReverse = (not reverseGreen and self.noReverseTimeRef and timePassedSince(self.noReverseTimeRef) > plusminus(2500,0.2)) or groundSpeed() < 100
       if self.landedAtTime and reverseSelected() and not self.noReverseTimeRef then 
          self.noReverseTimeRef = currTime() 
       end
