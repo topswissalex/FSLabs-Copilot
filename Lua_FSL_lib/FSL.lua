@@ -1,19 +1,17 @@
+local json = require("json")
+local maf = require("maf")
+local socket = require("socket")
+local http = require("socket.http")
+
 local rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
-local currrentdir = rootdir .."Lua_FSL_lib\\"
-
-local json = require(currrentdir .. "json")
-local maf = require(currentdir .. "maf")
-local socket = require(currentdir .. "socket")
-local http = require(currentdir .. "socket.http")
-
 local rotorbrake = 66587
+local remote_port = remote_port
 local pilot = pilot
-local human = human or true
+local human = human or not pilot or true
 local noPauses = noPauses or false
-if not pilot then human = false end
-local logging = false
+local logging = true
 
--- Logging ------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
 local logname = rootdir .. "Lua_FSL_lib\\FSL.log"
@@ -37,7 +35,6 @@ local function log(str, drawline, notimestamp)
    local timestamp = "[" .. temp.hour .. ":" .. temp.min .. ":" .. temp.sec .. "] - "
    if notimestamp == 1 then timestamp = "" end
    if drawline == 1 then
-      ipc.log("-------------------------------------------------------------------------------------------") 
       io.write("-------------------------------------------------------------------------------------------\n")
    end
    io.write(timestamp .. str .. "\n")
@@ -49,9 +46,7 @@ end
 
 math.randomseed(os.time())
 
-function prob(prob)
-   return math.random() <= prob
-end
+function prob(prob) return math.random() <= prob end
 
 function plusminus(val, percent)
    percent = percent or 0.2
@@ -69,7 +64,7 @@ function think(dist)
    ipc.sleep(time)
 end
 
-local hand = {
+hand = {
 
    speed = function(dist)
       log("Distance: " .. math.floor(dist) .. " mm")
@@ -130,11 +125,11 @@ local Control = {
             control.posn[k:upper()] = v
          end
       end
-      return obj
+      return control
    end,
 
-   __call = function(self,targetpos)
-      local button = not targetpos
+   __call = function(self,targetPos)
+      local button = not targetPos
       local switch = not button
       if (button and not self.posn) or (switch and self.posn) then
          log("Position of control " .. self.var:gsub("VC_", "") .. ": x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z), 1)
@@ -146,14 +141,14 @@ local Control = {
       if button and not self.posn then
          self:press()
       elseif switch and self.posn then
-         self:set(targetpos)
+         self:set(targetPos)
       end
    end,
 
    press = function(self)
       if self.inc and self.dec then
          ipc.control(rotorbrake, self.inc)
-         ipc.sleep(self.sleepbetween or 50)
+         ipc.sleep(50)
          ipc.control(rotorbrake, self.dec)
       elseif self.tgl then
          ipc.control(rotorbrake, self.tgl)
@@ -165,17 +160,17 @@ local Control = {
       end
    end,
 
-   set = function(self,targetpos)
-      targetpos = self.posn[targetpos:upper()]
-      if not targetpos then return end
-      local currpos = self:getVar()
-      if currpos ~= targetpos then
+   set = function(self,targetPos)
+      targetPos = self.posn[targetPos:upper()]
+      if not targetPos then return end
+      local currPos = self:getVar()
+      if currPos ~= targetPos then
          while true do
-            currpos = self:getVar()
-            if currpos < targetpos then
+            currPos = self:getVar()
+            if currPos < targetPos then
                if self.tgl then ipc.control(rotorbrake, self.tgl)
                else ipc.control(rotorbrake, self.inc) end
-            elseif currpos > targetpos then
+            elseif currPos > targetPos then
                if self.tgl then ipc.control(rotorbrake, self.tgl)
                else ipc.control(rotorbrake, self.dec) end
             else break end
@@ -208,14 +203,11 @@ local Control = {
 
 }
 
+Control.__index = Control
 
 local FSL = {
 
-   CPT = {},
-
-   FO = {},
-
-   PF = {},
+   CPT = {}, FO = {}, PF = {},
 
    getThrustLeversPos = function(self,TL)
       local TL_posns = {
@@ -231,16 +223,14 @@ local FSL = {
       elseif TL == 2 then pos = ipc.readLvar("VC_PED_TL_2")
       end
       for k,v in pairs(TL_posns) do
-         if pos and math.abs(pos - v) < 4 then
+         if (pos and math.abs(pos - v) < 4) or (not pos and math.abs(ipc.readLvar("VC_PED_TL_1")  - v) < 4 and math.abs(ipc.readLvar("VC_PED_TL_2")  - v) < 4) then
             return k
-         elseif not pos then
-            return math.abs(ipc.readLvar("VC_PED_TL_1")  - v) < 4 and math.abs(ipc.readLvar("VC_PED_TL_2")  - v) < 4
          end
       end
    end,
 
    setTakeoffFlaps = function(self)
-      local setting = tostring(self.atsuLog:takeoffFlaps() or self.getTakeoffFlapsFromMcdu())
+      local setting = tostring(self.atsuLog:takeoffFlaps() or self:getTakeoffFlapsFromMcdu())
       self.PED_FLAP_LEVER(setting)
       return setting
    end,
@@ -254,13 +244,13 @@ local FSL = {
    getTakeoffFlapsFromMcdu = function(self,side)
       side = side or pilot
       if side == 1 then _side = "CPT" elseif side == 2 then _side = "FO" end
-      self.[_side].PED_MCDU_KEY_PERF()
+      self[_side].PED_MCDU_KEY_PERF()
       ipc.sleep(500)
       return tonumber(self.MCDU.getDisplay(side,162,162))
    end,
    
    bird = function()
-      local port = tostring(remote_port) or "8080"
+      local port = remote_port or "8080"
       local FCU = http.request("http://localhost:" .. port .. "/FCU/Display")
       return FCU:find("HDG_VS_SEL\":false") ~= nil
    end,
@@ -268,7 +258,7 @@ local FSL = {
    MCDU = {
 
       getDisplay = function(side,startpos,endpos)
-         local port = tostring(remote_port) or "8080"
+         local port = remote_port or "8080"
          local displaystr = http.request("http://localhost:" .. port .. "/MCDU/Display/3CA" .. side)
          displaystr = displaystr:sub(displaystr:find("%[%[") + 1, displaystr:find("%]%]"))
          local display = {}
@@ -436,7 +426,7 @@ end
 -----------------------------------------------------------------------------------------
 
 local rawControls = rootdir .. "Lua_FSL_lib\\FSL.json"
-io.input(file)
+io.input(rawControls)
 rawControls = json.parse(io.read())
 
 for varname,control in pairs(rawControls) do
@@ -461,8 +451,8 @@ for varname,control in pairs(rawControls) do
          if pattern == "_CP" and varname:find("_CPT") then pattern = "_CPT" end
          controlName = varname:gsub(pattern,replace)
          FSL.CPT[controlName] = Control:new(control)
-         if pilot == 1 then FSL[controlName] = Control:new(control)
-         elseif pilot == 2 then FSL.PF[controlName] = Control:new(control) end
+         if pilot == 1 then FSL[controlName] = FSL.CPT[controlName]
+         elseif pilot == 2 then FSL.PF[controlName] = FSL.CPT[controlName] end
       end
    end
    for pattern, replace in pairs(replace.FO) do
@@ -470,11 +460,11 @@ for varname,control in pairs(rawControls) do
          side = true
          controlName = varname:gsub(pattern,replace)
          FSL.FO[controlName] = Control:new(control)
-         if pilot == 2 then FSL[controlName] = Control:new(control)
-         elseif pilot == 1 then FSL.PF[controlName] = Control:new(control) end
+         if pilot == 2 then FSL[controlName] = FSL.FO[controlName]
+         elseif pilot == 1 then FSL.PF[controlName] = FSL.FO[controlName] end
       end
    end
    if not side then FSL[varname] = Control:new(control) end
 end
 
-return FSL, hand
+return FSL

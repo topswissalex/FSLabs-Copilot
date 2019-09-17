@@ -1,4 +1,6 @@
---[[ json.lua
+--[[ 
+  
+https://gist.github.com/tylerneylon/59f4bcf316be525b30ab
 
 A compact pure-Lua JSON library.
 The main functions are: json.stringify, json.parse.

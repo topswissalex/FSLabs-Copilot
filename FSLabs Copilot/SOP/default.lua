@@ -1,51 +1,50 @@
-local FSL = FSL
-local hand = FSL.hand
+preventLoop = true
+require "FSLabs Copilot"
+local FSL, hand = FSL, hand
 
-function waitForStartup()
-   local engines_started
+function waitForEnginesStarted()
    repeat
-      local Eng1_N1 = ipc.readUW(0x0898) * 100 / 16384
-      local Eng2_N1 = ipc.readUW(0x0930) * 100 / 16384
-      if (Eng1_N1 > 15 or Eng2_N1 > 15) and FSL.PED_ENG_MODE_Switch:getPosn() == "NORM" then
-         ipc.sleep(4000)
-         engines_started = (Eng1_N1 > 15 or Eng2_N1 > 15) and FSL.PED_ENG_MODE_Switch:getPosn() == "NORM"
+      local enginesStarted = enginesRunning() and FSL.PED_ENG_MODE_Switch:getPosn() == "NORM"
+      if enginesStarted then
+         sleep(4000)
+         enginesStarted = enginesRunning() and FSL.PED_ENG_MODE_Switch:getPosn() == "NORM"
       end
-      ipc.sleep(1000)
-   until engines_started
+      sleep()
+   until enginesStarted
 end
 
 function afterStartSequence()
    FSL.PED_SPD_BRK_LEVER("ARM")
-   FSL.setTakeoffFlaps() -- first checks the ATSU log. if nothing is there, checks the MCDU PERF page.
-   repeat ipc.sleep(100) until ipc.readLvar("FSLA320_NWS_Pin") == 0 -- because GSX messes with setting the trim during pushback
+   FSL:setTakeoffFlaps() -- first checks the ATSU log. if nothing is there, checks the MCDU PERF page.
+   repeat sleep() until not pushback() -- because GSX messes with setting the trim during pushback
    FSL.trimwheel:set() -- sets the trim using the final loadsheet MACTOW from the ATSU log
    hand:rest()
 end
 
 function waitForLineup()
-   local startedCountingAtTime, count
+   local startedCountingAtTime
+   local count = 0
    repeat
       local switchPos = FSL.OVHD_SIGNS_SeatBelts_Switch:getVar()
       if prevSwitchPos and prevSwitchPos ~= switchPos then
-         if not count then 
-            count = 0
-            startedCountingAtTime = ipc.elapsedtime()
-          end
          count = count + 1
+         if count == 0 then startedCountingAtTime = currTime() end
       end
-      if startedCountingAtTime and ipc.elapsedtime() - startedCountingAtTime > 2000 then
-         count = false
+      if startedCountingAtTime and timePassedSince(startedCountingAtTime) > 2000 then
+         count = 0
+         startedCountingAtTime = nil
       end
       prevSwitchPos = switchPos
-      ipc.sleep(100)
-      if ipc.readUB(0x0366) == 1 then return true end
+      sleep()
+      if not onGround() then return false end
    until count == 4
-   ipc.sleep(plusminus(2000))
-   if prob(0.2) then ipc.sleep(plusminus(2000)) end
+   sleep(plusminus(2000))
+   if prob(0.2) then sleep(plusminus(2000)) end
+   return true
 end
 
 function lineUpSequence()
-   local packs = FSL.getTakeoffPacksFromAtsuLog() or packs_ON_takeoff
+   local packs = FSL.atsuLog.takeoffPacks() or packs_on_takeoff
    FSL.PED_ATCXPDR_MODE_Switch("TARA")
    if packs == 0 then
       if FSL.OVHD_AC_Pack_1_Button:isDown() then FSL.OVHD_AC_Pack_1_Button() end
@@ -55,41 +54,35 @@ function lineUpSequence()
 end
 
 function waitForTakeoff()
-   repeat ipc.sleep(100) until ipc.readLvar("VC_PED_TL_1") > 26 and ipc.readLvar("VC_PED_TL_2") > 26
-   ipc.sleep(3000)
-   if ipc.readLvar("VC_PED_TL_1") > 26 and ipc.readLvar("VC_PED_TL_2") > 26 then
-      return
-   else waitForTakeoff()
+   while true do
+      sleep()
+      if thrustLeversSetForTakeoff() then
+         sleep(3000)
+         return
+      end
    end
 end
 
 function takeoffSequence()
-   
 end
 
-function waitForClbThrust()
-   repeat ipc.sleep(1000) until ipc.readUB(0x0366) == 0
-   repeat ipc.sleep(1000) until FSL.getThrustLeversPos(1) == "CLB" and FSL.getThrustLeversPos(2) == "CLB"
-   ipc.sleep(plusminus(2000))
+function waitForClbThrust() 
+   repeat sleep() until not onGround() and FSL.getThrustLeversPos() == "CLB" 
 end
 
 function afterTakeoffSequence()
    if not FSL.OVHD_AC_Pack_1_Button:isDown() then FSL.OVHD_AC_Pack_1_Button() hand:rest() end
-   ipc.sleep(plusminus(10000,0.2))
+   sleep(plusminus(10000,0.2))
    if not FSL.OVHD_AC_Pack_2_Button:isDown() then FSL.OVHD_AC_Pack_2_Button() hand:rest() end
-   repeat ipc.sleep(100) until ipc.readLvar("FSLA320_slat_l_1") == 0
-   ipc.sleep(plusminus(2000,0.5))
+   repeat sleep(100) until readLvar("FSLA320_slat_l_1") == 0
+   sleep(plusminus(2000,0.5))
    FSL.PED_SPD_BRK_LEVER("RET")
    hand:rest()
 end
 
 function waitForAfterLanding()
-   repeat
-      ipc.sleep(1000)
-      local on_ground = ipc.readUB(0x0366) == 1
-      local GS = ipc.readUD(0x02b4) / 65536 * 3600 / 1852
-   until on_ground and GS < 30 and FSL.PED_SPD_BRK_LEVER:getPosn() ~= "ARM"
-   ipc.sleep(plusminus(5000,0.5))
+   repeat sleep() 
+   until onGround() and groundSpeed() < 30 and FSL.PED_SPD_BRK_LEVER:getPosn() ~= "ARM"
 end
 
 function afterLandingCleanup()
@@ -113,22 +106,31 @@ function afterLandingCleanup()
 end
 
 function main()
-   if after_start == 1 then
-      waitForStartup()
-      afterStartSequence()
-   end
-   if lineup == 1 then
-      local skip = waitForLineup() 
-      if not skip then lineUpSequence() end
-   end
-   if after_takeoff == 1 then
-      waitForClbThrust()
-      afterTakeoffSequence()
+   if onGround() then
+      if after_start == 1 then
+         waitForEnginesStarted()
+         afterStartSequence()
+      end
+      if lineup == 1 then
+         local skip = not waitForLineup() 
+         if not skip then lineUpSequence() end
+      end
+      if takeoff == 1 then
+         waitForTakeoff()
+         takeoffSequence()
+      end
+      if after_takeoff == 1 then
+         waitForClbThrust()
+         sleep(plusminus(2000))
+         afterTakeoffSequence()
+      end
    end
    if after_landing == 1 then
       waitForAfterLanding()
+      sleep(plusminus(5000,0.5))
       afterLandingCleanup()
    end
+   repeat sleep() until not enginesRunning()
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -142,12 +144,6 @@ end
 
 ---------------------------------------------------------------------------------------------------
 
--- Uncomment to test the complete flow:
-
---main()
-
----------------------------------------------------------------------------------------------------
-
 -- Uncomment one sequence and/or its trigger function to test them separately
 
 -- As an example, to test the after landing sequence and its trigger, you need to uncomment them,
@@ -156,32 +152,24 @@ end
 
 ---------------------------------------------------------------------------------------------------
 
---waitForStartup()
---afterStartSequence()
+-- waitForStartup()
+-- afterStartSequence()
 
 
 
---waitForLineup()
---lineUpSequence()
+-- waitForLineup()
+-- lineUpSequence()
 
 
 
---waitForClbThrust()
---afterTakeoffSequence()
+-- waitForClbThrust()
+-- afterTakeoffSequence()
 
 
 
---waitForAfterLanding()
---afterLandingCleanup()
+-- waitForAfterLanding()
+-- afterLandingCleanup()
 
+-----------------------------------------------------------------------------------------
 
----------------------------------------------------------------------------------------------------
-
-while true do
-   main()
-   repeat
-      ipc.sleep(5000)
-      local Eng1_N1 = ipc.readUW(0x0898) * 100 / 16384
-      local Eng2_N1 = ipc.readUW(0x0930) * 100 / 16384
-   until Eng1_N1 < 5 and Eng2_N1 < 5
-end
+while true do main() end
