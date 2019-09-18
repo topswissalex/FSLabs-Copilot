@@ -90,8 +90,9 @@ end
 function enginesRunning()
    local eng1_N1 = ipc.readUW(0x0898) * 100 / 16384
    local eng2_N1 = ipc.readUW(0x0930) * 100 / 16384
-   if eng1_N1 > 15 and eng2_N1 > 15 then return true
-   elseif eng1_N1 < 15 and eng2_N1 < 15 then return false end
+   local eng1_running = eng1_N1 > 15
+   local eng2_running = eng2_N1 > 15
+   return eng1_running or eng2_running
 end
 
 function takeoffThrustIsSet()

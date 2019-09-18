@@ -21,14 +21,6 @@ function afterStartSequence()
    hand:rest()
 end
 
-function waitForChecksCompleted()
-   repeat sleep() coroutine.yield() until ipc.get("flightControlsChecked") and ipc.get("brakesChecked")
-end
-
-function taxi()
-   
-end
-
 function waitForLineup()
    local startedCountingAtTime
    local count = 0
@@ -46,32 +38,18 @@ function waitForLineup()
       sleep()
       if not onGround() then return false end
    until count == 4
-   sleep(plusminus(2000))
-   if prob(0.2) then sleep(plusminus(2000)) end
    return true
 end
 
 function lineUpSequence()
-   local packs = FSL.atsuLog.takeoffPacks() or packs_on_takeoff
+   local packs = FSL.atsuLog:takeoffPacks() or packs_on_takeoff
+   FSL.PED_ATCXPDR_ON_OFF_Switch("ON")
    FSL.PED_ATCXPDR_MODE_Switch("TARA")
    if packs == 0 then
       if FSL.OVHD_AC_Pack_1_Button:isDown() then FSL.OVHD_AC_Pack_1_Button() end
       if FSL.OVHD_AC_Pack_2_Button:isDown() then FSL.OVHD_AC_Pack_2_Button() end
    end
    hand:rest()
-end
-
-function waitForTakeoff()
-   while true do
-      sleep()
-      if thrustLeversSetForTakeoff() then
-         sleep(3000)
-         return
-      end
-   end
-end
-
-function takeoffSequence()
 end
 
 function waitForClbThrust() 
@@ -82,7 +60,7 @@ function afterTakeoffSequence()
    if not FSL.OVHD_AC_Pack_1_Button:isDown() then FSL.OVHD_AC_Pack_1_Button() hand:rest() end
    sleep(plusminus(10000,0.2))
    if not FSL.OVHD_AC_Pack_2_Button:isDown() then FSL.OVHD_AC_Pack_2_Button() hand:rest() end
-   repeat sleep(100) until readLvar("FSLA320_slat_l_1") == 0
+   repeat sleep() until readLvar("FSLA320_slat_l_1") == 0
    sleep(plusminus(2000,0.5))
    FSL.PED_SPD_BRK_LEVER("RET")
    hand:rest()
@@ -124,12 +102,11 @@ function main()
 
       if lineup == 1 then
          local skip = not waitForLineup() 
-         if not skip then lineUpSequence() end
-      end
-
-      if takeoff == 1 then
-         waitForTakeoff()
-         takeoffSequence()
+         if not skip then
+            sleep(plusminus(2000))
+            if prob(0.2) then sleep(plusminus(2000)) end
+            lineUpSequence() 
+         end
       end
 
       if after_takeoff == 1 then
@@ -137,6 +114,7 @@ function main()
          sleep(plusminus(2000))
          afterTakeoffSequence()
       end
+
    end
 
    if after_landing == 1 then

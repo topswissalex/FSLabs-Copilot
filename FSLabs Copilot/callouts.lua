@@ -31,6 +31,7 @@ local callouts = {
       self.flightControlsChecked = (onGround() and enginesRunning() and not self.firstRun) or false
       if not self.brakesChecked then ipc.set("brakesChecked", nil) else ipc.set("brakesChecked", 1) end
       if not self.flightControlsChecked then ipc.set("flightControlsChecked", nil) else ipc.set("flightControlsChecked", 1) end
+      self.firstRun = false
    end,
 
    main = function(self)
@@ -72,8 +73,6 @@ local callouts = {
       if self.airborne then self.latestTouchdownAtTime = currTime() end
 
       if groundSpeed() > 60 then self:rollout() end
-
-      self.firstRun = false
 
    end,
 
@@ -339,7 +338,7 @@ local callouts = {
 
       repeat
 
-         if thrustLeversSetForTakeoff() then return end
+         if thrustLeversSetForTakeoff() or not enginesRunning() then return end
 
          local leftBrakeApp = ipc.readUW(0x0BC4) * 100 / 16383
          local rightBrakeApp = ipc.readUW(0x0BC6) * 100 / 16383
@@ -391,7 +390,7 @@ callouts.flightControlsCheck = {
       
       repeat
 
-         if thrustLeversSetForTakeoff() then return end
+         if thrustLeversSetForTakeoff() or not enginesRunning() then return end
 
          -- full left aileron
          if not fullLeft and not ((fullUp or fullDown) and not yNeutral) and self:fullLeft() then

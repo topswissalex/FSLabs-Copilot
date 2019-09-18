@@ -103,7 +103,7 @@ local Control = {
          --0,0,0 is at the bottom left corner of the pedestal's top side
          OVHD = {maf.vector(39,730,1070), 2.75762}, --bottom left corner (the one that is part of the bottom edge)
          --MIP = {maf.vector(), 0},
-         GSLD = {maf.vector(-424, 663, 527), 1.32645} --bottom left corner of the panel with the chrono button
+         GSLD = {maf.vector(-424, 663, 527), 1.32645} --bottom left corner of the panel with the autoland button
       }
       for section,refpos in pairs(ref) do
          if control.var:find(section) then
