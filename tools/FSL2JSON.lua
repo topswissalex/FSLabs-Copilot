@@ -831,7 +831,7 @@ VC_PED_ECP_WHEEL_Brt_Lt = 0,
 VC_PED_ECP_WHEEL_Dim_Lt = 0,
 }
 
-local rotorbrake = 66587 --rotorbrake control
+local rotorbrake = 66587
 local json = require("json")
 local log = ipc.log
 
@@ -923,16 +923,89 @@ function parse(startparam,endparam)
 
 end
 
+function findRange()
+   for _,control in pairs(FSL) do
+      local varname = control.var
+      local readLvar = ipc.readLvar
+      if (varname:find("Knob") or varname:find("VC_WINDOW_CPT") or varname:find("VC_WINDOW_FO") or varname:find("BLIND") or varname:find("SEAT")) and control.inc and control.dec then
+
+         local wait
+         if varname:find("Knob") then wait = 5000 else wait = 10000 end
+
+         control.range = {}
+
+         local tired
+         local startTime = ipc.elapsedtime()
+
+         repeat
+            local pos = readLvar(varname)
+            ipc.control(rotorbrake, control.dec)
+            ipc.sleep(5)
+            local newPos = readLvar(varname)
+            tired = ipc.elapsedtime() - startTime > wait
+         until (newPos == pos) or tired
+
+         if not tired then control.range[1] = readLvar(varname) end
+
+         local tired
+         local startTime = ipc.elapsedtime()
+
+         repeat
+            local pos = readLvar(varname)
+            ipc.control(rotorbrake, control.inc)
+            ipc.sleep(5)
+            local newPos = readLvar(varname)
+            tired = ipc.elapsedtime() - startTime > wait
+         until (newPos == pos) or tired
+
+         if not tired then control.range[2] = readLvar(varname) end
+
+      end
+   end
+end
+
 function main (startparam, endparam)
 
    parse(startparam,endparam)
    parse(endparam,startparam)
 
+   findRange()
+
    for varname in pairs(FSL) do
-      if not FSL[varname]["dec"] or not FSL[varname]["inc"] then
-         FSL[varname]["tgl"] = FSL[varname]["dec"] or FSL[varname]["inc"]
-         FSL[varname]["dec"] = nil
-         FSL[varname]["inc"] = nil
+      if not FSL[varname].dec or not FSL[varname].inc then
+         FSL[varname].tgl = FSL[varname].dec or FSL[varname].inc
+         FSL[varname].dec = nil
+         FSL[varname].inc = nil
+      elseif FSL[varname].dec and FSL[varname].inc and not FSL[varname].range then
+
+         local wait = 1000
+
+         local pos = ipc.readLvar(FSL[varname].var)
+
+         ipc.control(rotorbrake,FSL[varname].inc)
+
+         local time = ipc.elapsedtime()
+
+         repeat until ipc.readLvar(FSL[varname].var) ~= pos or ipc.elapsedtime() - time > wait
+
+         local newPos = ipc.readLvar(FSL[varname].var)
+
+         if newPos ~= pos then
+
+            ipc.control(rotorbrake,FSL[varname].inc)
+
+            local time = ipc.elapsedtime()
+
+            repeat until ipc.readLvar(FSL[varname].var) ~= newPos or ipc.elapsedtime() - time > wait
+
+            newPos = ipc.readLvar(FSL[varname].var)
+
+            if newPos == pos then
+               FSL[varname].tgl = FSL[varname].inc
+               FSL[varname].dec = nil
+               FSL[varname].inc = nil
+            end
+         end
       end
    end
 
@@ -946,6 +1019,6 @@ function main (startparam, endparam)
 
 end
 
-main(71000,79000)
+main(71000,71050)
 
 print("FSL2JSON finished!")
