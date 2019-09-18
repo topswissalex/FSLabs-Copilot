@@ -444,27 +444,44 @@ for varname,control in pairs(rawControls) do
          _FO = ""
       }
    }
-   local side
+   local controlTbl, side
    for pattern, replace in pairs(replace.CPT) do
       if varname:find(pattern) then
-         side = true
          if pattern == "_CP" and varname:find("_CPT") then pattern = "_CPT" end
          controlName = varname:gsub(pattern,replace)
          FSL.CPT[controlName] = Control:new(control)
+         controlTbl = FSL.CPT[controlName]
+         controlTbl.name = controlName
+         controlTbl.side = "CPT"
          if pilot == 1 then FSL[controlName] = FSL.CPT[controlName]
          elseif pilot == 2 then FSL.PF[controlName] = FSL.CPT[controlName] end
       end
    end
    for pattern, replace in pairs(replace.FO) do
       if varname:find(pattern) then
-         side = true
          controlName = varname:gsub(pattern,replace)
          FSL.FO[controlName] = Control:new(control)
+         controlTbl = FSL.FO[controlName]
+         controlTbl.name = controlName
+         controlTbl.side = "FO"
          if pilot == 2 then FSL[controlName] = FSL.FO[controlName]
          elseif pilot == 1 then FSL.PF[controlName] = FSL.FO[controlName] end
       end
    end
-   if not side then FSL[varname] = Control:new(control) end
+   if not controlTbl then
+      FSL[varname] = Control:new(control)
+      controlTbl = FSL[varname]
+      controlTbl.name = varname
+   end
+   if controlTbl.posn then
+      for pos in pairs(controlTbl.posn) do
+         if controlTbl.side then
+            FSL[controlTbl.side][controlTbl.name .. "_" .. pos:upper()] = function() controlTbl:set(pos) end
+         else
+            FSL[controlTbl.name .. "_" .. pos:upper()] = function() controlTbl:set(pos) end
+         end
+      end
+   end
 end
 
 return FSL
