@@ -836,7 +836,7 @@ local json = require("json")
 local log = ipc.log
 
 local FSL = {}
-local json_old = "old\\FSL.json"
+local json_old = "json_old\\FSL.json"
 io.input(json_old)
 json_old = json.parse(io.read())
 
@@ -946,6 +946,6 @@ function main (startparam, endparam)
 
 end
 
-main(72000,72100)
+main(71000,79000)
 
 print("FSL2JSON finished!")

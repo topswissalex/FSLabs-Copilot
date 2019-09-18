@@ -34,9 +34,11 @@ pack2_off_after_landing = 0
 -- ##################################################################
 
 rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
-package.path = rootdir .. "Lua_FSL_lib\\?.lua;" .. package.path
-pilot = PM
-FSL = require "FSL"
+
+FSL2Lua_pilot = PM
+FSL2Lua_log = 1
+FSL = require "FSL2Lua"
+
 readLvar = ipc.readLvar
 currTime = ipc.elapsedtime
 sound_path = "..\\Modules\\FSLabs Copilot\\Sounds" 

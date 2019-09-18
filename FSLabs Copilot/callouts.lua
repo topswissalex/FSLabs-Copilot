@@ -1,4 +1,4 @@
-noPauses = true
+FSL2Lua_noPauses = true
 preventLoop = true
 require "FSLabs Copilot"
 

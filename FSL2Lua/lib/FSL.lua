@@ -5,16 +5,16 @@ local http = require("socket.http")
 
 local rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
 local rotorbrake = 66587
-local remote_port = remote_port
-local pilot = pilot
-local human = human or not pilot or true
-local noPauses = noPauses or false
-local logging = true
+local remote_port = FSL2Lua_remote_port
+local pilot = FSL2Lua_pilot
+local human = FSL2Lua_human or not pilot or true
+local noPauses = FSL2Lua_noPauses or false
+local logging = FSL2Lua_log = 1
 
 -----------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
-local logname = rootdir .. "Lua_FSL_lib\\FSL.log"
+local logname = rootdir .. "FSL2Lua\\FSL.log"
 io.open(logname,"w"):close()
 
 local function log(str, drawline, notimestamp)
@@ -407,6 +407,7 @@ do
    local path
    while true do
       local line = io.read()
+      if not line:find("\\FSLabs\\SimObjects") then break end
       local index = line:find("\\FSLabs\\SimObjects")
       if index then
          local type
@@ -483,5 +484,8 @@ for varname,control in pairs(rawControls) do
       end
    end
 end
+
+bindKey = event.key
+bindButton = event.button
 
 return FSL
