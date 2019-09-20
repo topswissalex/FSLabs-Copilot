@@ -5,6 +5,7 @@
 -- Callouts:
 
 volume = 65
+remote_port = 8080 -- The port of the remote MCDU. Only change it here if you changed it in the FSLabs options
 play_V1 = 1 -- play V1 sound? 0 = no, 1 = yes
 V1_timing = 0 -- V1 will be announced at the speed of V1 - V1_timing. If you want V1 to be announced slightly before V1 is reached on the PFD, type the number of knots.
 PM = 2 -- Pilot Monitoring: 1 = Captain, 2 = First Officer
@@ -36,7 +37,7 @@ pack2_off_after_landing = 0
 rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
 
 FSL2Lua_pilot = PM
-FSL2Lua_log = 1
+FSL2Lua_log = 0
 FSL = require "FSL2Lua"
 
 readLvar = ipc.readLvar
@@ -131,7 +132,7 @@ end
 
 sound.path(sound_path)
 
-if preventLoop then return end
+if package.loaded["FSLabs Copilot"] then return end
 
 if enable_actions == 1 then ipc.runlua("FSLabs Copilot\\SOP\\" .. SOP) end
 ipc.runlua("FSLabs Copilot\\callouts")

@@ -1,4 +1,4 @@
-preventLoop = true
+FSL2Lua_do_sequences = true
 require "FSLabs Copilot"
 local FSL, hand = FSL, hand
 
@@ -87,7 +87,7 @@ function afterLandingCleanup()
    if FSL.GSLD_EFIS_LS_Button:isLit() then FSL.GSLD_EFIS_LS_Button() end
    if not FSL.GSLD_EFIS_FD_Button:isLit() then FSL.GSLD_EFIS_FD_Button() end
    if pack2_off_after_landing == 1 and FSL.OVHD_AC_Pack_2_Button:isDown() then FSL.OVHD_AC_Pack_2_Button() end
-   FSL.startTheApu()
+   FSL:startTheApu()
    hand:rest()
 end
 

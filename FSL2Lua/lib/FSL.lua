@@ -5,11 +5,11 @@ local http = require("socket.http")
 
 local rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
 local rotorbrake = 66587
-local remote_port = FSL2Lua_remote_port
-local pilot = FSL2Lua_pilot
-local human = FSL2Lua_human or not pilot or true
-local noPauses = FSL2Lua_noPauses or false
-local logging = FSL2Lua_log = 1
+local remote_port = remote_port
+local pilot = FSL2Lua_pilot or pilot
+local human = FSL2Lua_do_sequences or human or false
+if not pilot then human = false end
+local logging = FSL2Lua_log == 1
 
 -----------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
@@ -96,26 +96,8 @@ hand.pos = hand.home
 
 local Control = {
 
-   initPos = function(self,control)
-      local pos = control.pos
-      pos = maf.vector(tonumber(pos.x), tonumber(pos.y), tonumber(pos.z))
-      local ref = {
-         --0,0,0 is at the bottom left corner of the pedestal's top side
-         OVHD = {maf.vector(39,730,1070), 2.75762}, --bottom left corner (the one that is part of the bottom edge)
-         --MIP = {maf.vector(), 0},
-         GSLD = {maf.vector(-424, 663, 527), 1.32645} --bottom left corner of the panel with the autoland button
-      }
-      for section,refpos in pairs(ref) do
-         if control.var:find(section) then
-            local r = maf.rotation.fromAngleAxis(refpos[2], 1, 0, 0)
-            pos = pos:rotate(r) + refpos[1]
-         end
-      end
-      return pos
-   end,
-
    new = function(self,control)
-      control.pos = self:initPos(control)
+      if control.var:find("Guard") then control.guard = true end
       setmetatable(control,self)
       if control.posn then
          local temp = control.posn
@@ -131,16 +113,17 @@ local Control = {
    __call = function(self,targetPos)
       local button = not targetPos
       local switch = not button
+      local knob = self.range
       if (button and not self.posn) or (switch and self.posn) then
          log("Position of control " .. self.var:gsub("VC_", "") .. ": x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z), 1)
-         if human and not noPauses then
+         if human then
             local reachtime = hand:moveto(self.pos) 
             log("Control reached in " .. math.floor(reachtime) .. " ms")
          end
       end
       if button and not self.posn then
          self:press()
-      elseif switch and self.posn then
+      elseif (switch and self.posn) or knob then
          self:set(targetPos)
       end
    end,
@@ -154,15 +137,20 @@ local Control = {
          ipc.control(rotorbrake, self.tgl)
       end
       local t = plusminus(self.time or 300) - 50
-      if human and not noPauses then
+      if human then
          ipc.sleep(t)
          log("Interaction with the control took " .. t .. " ms")
       end
    end,
 
    set = function(self,targetPos)
-      targetPos = self.posn[targetPos:upper()]
-      if not targetPos then return end
+      local sleepTime = 5
+      if self.range and type(targetPos) == "number" then
+         targetPos = self.range / 100 * targetPos
+      elseif type(targetPos) == "string" then
+         if human then sleepTime = self.time or 300 end
+         targetPos = self.posn[targetPos:upper()]
+      end
       local currPos = self:getVar()
       if currPos ~= targetPos then
          while true do
@@ -174,11 +162,9 @@ local Control = {
                if self.tgl then ipc.control(rotorbrake, self.tgl)
                else ipc.control(rotorbrake, self.dec) end
             else break end
-            local t = plusminus(self.time or 300)
-            if human and not noPauses then
-               log("Interaction with the control took " .. t .. " ms")
-               ipc.sleep(t) 
-            end
+            local t = plusminus(sleepTime)
+            ipc.sleep(t) 
+            if human then log("Interaction with the control took " .. t .. " ms") end
          end
       end
    end,
@@ -199,7 +185,15 @@ local Control = {
 
    getVar = function(self) return ipc.readLvar(self.var) end,
 
-   isDown = function(self) if not self.posn then return ipc.readLvar(self.var) == 10 end end
+   isDown = function(self) if not self.posn then return ipc.readLvar(self.var) == 10 end end,
+
+   open = function(self) if self.guard then ipc.control(rotorbrake,self.inc) end end,
+
+   close = function(self) if self.guard then ipc.control(rotorbrake,self.dec) end end,
+
+   push = function(self) if self.pushctrl then ipc.control(rotorbrake,self.pushctrl) end end,
+
+   pull = function(self) if self.pullctrl then ipc.control(rotorbrake,self.pullctrl) end end,
 
 }
 
@@ -423,14 +417,46 @@ do
    io.close(file)
 end
 
+-----------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------
+
+keyBindCount = 0
+
+function keyBind(keycode,func,cond,shifts)
+   cond = cond or function() return true end
+   keyBindCount = keyBindCount + 1
+   local funcName = "keyBind" .. keyBindCount
+   _G[funcName] = function() if cond() then func() end end
+   event.key(keycode,shifts,funcName)
+end
+
 -- Main ---------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
-local rawControls = rootdir .. "Lua_FSL_lib\\FSL.json"
+function initPos(control)
+   local pos = control.pos
+   pos = maf.vector(tonumber(pos.x), tonumber(pos.y), tonumber(pos.z))
+   local ref = {
+      --0,0,0 is at the bottom left corner of the pedestal's top side
+      OVHD = {maf.vector(39,730,1070), 2.75762}, --bottom left corner (the one that is part of the bottom edge)
+      --MIP = {maf.vector(), 0},
+      GSLD = {maf.vector(-424, 663, 527), 1.32645} --bottom left corner of the panel with the autoland button
+   }
+   for section,refpos in pairs(ref) do
+      if control.var:find(section) then
+         local r = maf.rotation.fromAngleAxis(refpos[2], 1, 0, 0)
+         pos = pos:rotate(r) + refpos[1]
+      end
+   end
+   return pos
+end
+
+local rawControls = rootdir .. "FSL2Lua\\lib\\FSL.json"
 io.input(rawControls)
 rawControls = json.parse(io.read())
 
 for varname,control in pairs(rawControls) do
+   control.pos = initPos(control)
    local replace = {
       CPT = {
          MCDU_L = "MCDU",
@@ -484,8 +510,5 @@ for varname,control in pairs(rawControls) do
       end
    end
 end
-
-bindKey = event.key
-bindButton = event.button
 
 return FSL

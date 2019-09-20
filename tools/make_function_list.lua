@@ -1,16 +1,10 @@
 local FSL = require "FSL2Lua"
 
-local name = "List_of_Functions.txt"
+local name = "List of controls.txt"
 io.open(name,"w"):close()
 local file = io.open(name,"a")
 io.input(file)
 io.output(file)
-
-io.write("\nIf the control is a button, call its function without arguments.\n\n")
-io.write("If the control has positions, each position will have a separate function. For example:\n")
-io.write("FSL.OVHD_EXTLT_Strobe_Switch_ON\n\n")
-io.write("Alternatively, the base function can be called with the position as the argument:\n")
-io.write("FSL.OVHD_EXTLT_Strobe_Switch(\"ON\")\n\n\n")
 
 function pairsByKeys (t, f)
    local a = {}
@@ -56,5 +50,3 @@ end
 makeList(FSL,"FSL")
 makeList(FSL.FO, "FSL.FO")
 makeList(FSL.CPT, "FSL.CPT")
-makeList(FSL.MCDU, "FSL.MCDU")
-makeList(FSL.atsuLog, "FSL.atsuLog")

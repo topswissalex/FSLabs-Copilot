@@ -1,4 +1,4 @@
-local varlist = {
+local orig = {
    VC_OVHD_Probe_Window_Heat_Button = 0,
    VC_OVHD_AI_Wing_Anti_Ice_Button = 0,
    VC_OVHD_AI_Eng_1_Anti_Ice_Button = 0,
@@ -711,6 +711,18 @@ local varlist = {
    VC_OVHD_GEN_1_LINE_Button = 0,
 }
 
+local selected = {
+   VC_OVHD_ELAC1_Button = 0,
+   VC_OVHD_ELAC2_Button = 0,
+   VC_OVHF_FAC1_Button = 0,
+   VC_OVHF_FAC2_Button = 0,
+   VC_OVHD_SEC1_Button = 0,
+   VC_OVHD_SEC2_Button = 0,
+   VC_OVHD_SEC3_Button = 0
+}
+
+local varlist = selected or orig
+
 local lt = {
 VC_GEAR_LEVER_Lt = 0,
 VC_GSLD_CP_EFIS_ARPT_Brt_Lt = 0,
@@ -834,13 +846,14 @@ VC_PED_ECP_WHEEL_Dim_Lt = 0,
 local rotorbrake = 66587
 local json = require("json")
 local log = ipc.log
+local rotorbrakes_found = {}
 
 local FSL = {}
 local json_old = "json_old\\FSL.json"
 io.input(json_old)
 json_old = json.parse(io.read())
 
-local from_old = true
+local from_old = false
 
 for varname in pairs(varlist) do
    local _varname = varname:sub(4)
@@ -858,6 +871,19 @@ for varname in pairs(varlist) do
    else FSL[_varname].pos = {x = "", y = "", z = ""} end
 end
 
+local guardedButtons = {}
+
+for varname,control in pairs(FSL) do
+   if varname:find("Guard") then
+      local guardvar = varname
+      for varname in pairs(FSL) do
+         if varname:find(guardvar:gsub("_Guard","")) and varname ~= guardvar then
+            guardedButtons[guardvar] = varname
+         end
+      end
+   end
+end
+
 for lt_varname in pairs(lt) do
    local _lt_varname
    if lt_varname:find("Brt") or lt_varname:find("Dim") then
@@ -869,26 +895,32 @@ for lt_varname in pairs(lt) do
       _varname = varname:sub(4)
       if _varname:find(_lt_varname) then
          if lt_varname:find("Brt") or lt_varname:find("Dim") then
-            if not FSL[_varname]["Lt"] then
-               FSL[_varname]["Lt"] = {}
+            if not FSL[_varname].Lt then
+               FSL[_varname].Lt = {}
                if lt_varname:find("Brt") then
-                  FSL[_varname]["Lt"]["Brt"] = lt_varname
+                  FSL[_varname].Lt.Brt = lt_varname
                elseif lt_varname:find("Dim") then
-                  FSL[_varname]["Lt"]["Dim"] = lt_varname
+                  FSL[_varname].Lt.Dim = lt_varname
                end
             elseif lt_varname:find("Brt") then
-               FSL[_varname]["Lt"]["Brt"] = lt_varname
+               FSL[_varname].Lt.Brt = lt_varname
             elseif lt_varname:find("Dim") then
-               FSL[_varname]["Lt"]["Dim"] = lt_varname
+               FSL[_varname].Lt.Dim = lt_varname
             end
          else
-            FSL[_varname]["Lt"] = lt_varname
+            FSL[_varname].Lt = lt_varname
          end
       end
    end
 end
 
-function parse(startparam,endparam)
+local print = function(msg1,msg2)
+   msg2 = msg2 or ""
+   print("-----------------------------------------------------------------------------")
+   print(msg1,msg2)
+end
+
+function parse(startparam,endparam,guards)
 
    local step
    if endparam > startparam then step = 1
@@ -896,28 +928,111 @@ function parse(startparam,endparam)
 
    for param = startparam, endparam, step do
 
-      local pval = {}
-      for varname in pairs(varlist) do pval[varname] = ipc.readLvar(varname) end
-      ipc.control(rotorbrake, param)
-      ipc.display(param)
-      local time = ipc.elapsedtime()
+      if not rotorbrakes_found[param] then
 
-      repeat
-         local found
-         for varname in pairs(varlist) do
-            val = ipc.readLvar(varname)
-            _varname = varname:sub(4)
-            if val ~= pval[varname] then
-               found = true
-               print("Found something!")
-               if val > pval[varname] then
-                  if not FSL[_varname]["inc"] then FSL[_varname]["inc"] = param end
-               elseif val < pval[varname] then 
-                  if not FSL[_varname]["dec"] then FSL[_varname]["dec"] = param end
+         local readLvar = ipc.readLvar
+         local pval = {}
+         for varname in pairs(varlist) do pval[varname] = readLvar(varname) end
+         if guards then
+            for varname,control in pairs(FSL) do
+               if varname:find("Guard") and ipc.readLvar(control.var) == 0 then
+                  if control.inc then ipc.control(rotorbrake,control.inc)
+                  elseif control.tgl then ipc.control(rotorbrake,control.tgl) end
                end
             end
          end
-      until ipc.elapsedtime() - time > 1000 or found
+
+         ipc.control(rotorbrake, param)
+         local time = ipc.elapsedtime()
+         repeat
+            local found
+            for varname in pairs(varlist) do
+               local val = readLvar(varname)
+               _varname = varname:sub(4)
+               local skip
+               if not guards then
+                  for k,v in pairs(guardedButtons) do
+                     if v == _varname then
+                        skip = true
+                     end
+                  end
+               elseif guards then
+                  for k,v in pairs(guardedButtons) do
+                     if k == _varname then
+                        skip = true
+                     end
+                  end
+               end
+               if val ~= pval[varname] and not skip then
+                  found = true
+                  if val > pval[varname] then
+                     ipc.sleep(1000)
+                     if readLvar(varname) == pval[varname]then
+                        if not FSL[_varname].tgl then
+                           print("Assigning " .. param .. " to " .. varname, "tgl")
+                           FSL[_varname].tgl = param
+                           FSL[_varname].inc = nil
+                           FSL[_varname].dec = nil
+                           rotorbrakes_found[param] = varname
+                        end
+                     else
+                        ipc.control(rotorbrake,param)
+                        local time = ipc.elapsedtime()
+                        repeat until readLvar(varname) ~= val or ipc.elapsedtime() - time > 1000
+                        if readLvar(varname) == pval[varname] and not FSL[_varname].tgl then
+                           print("Assigning " .. param .. " to " .. varname, "tgl")
+                           FSL[_varname].tgl = param
+                           FSL[_varname].inc = nil
+                           FSL[_varname].dec = nil
+                           rotorbrakes_found[param] = varname
+                        elseif readLvar(varname) >= val and not FSL[_varname].inc and not FSL[_varname].tgl then
+                           print("Assigning " .. param .. " to " .. varname, "inc")
+                           FSL[_varname].inc = param
+                           rotorbrakes_found[param] = varname
+                        elseif readLvar(varname) <= val and not FSL[_varname].dec and not FSL[_varname].tgl then
+                           print("Assigning " .. param .. " to " .. varname, "dec")
+                           FSL[_varname].dec = param
+                           rotorbrakes_found[param] = varname
+                        end
+                     end
+                  elseif val < pval[varname] then 
+                     ipc.control(rotorbrake,param)
+                     local time = ipc.elapsedtime()
+                     repeat until readLvar(varname) ~= val or ipc.elapsedtime() - time > 1000
+                     if readLvar(varname) == pval[varname] and not FSL[_varname].tgl then
+                        print("Assigning " .. param .. " to " .. varname, "tgl")
+                        FSL[_varname].tgl = param
+                        FSL[_varname].inc = nil
+                        FSL[_varname].dec = nil
+                        rotorbrakes_found[param] = varname
+                     elseif readLvar(varname) <= val and not FSL[_varname].dec and not FSL[_varname].tgl then
+                        print("Assigning " .. param .. " to " .. varname, "dec")
+                        FSL[_varname].dec = param
+                        rotorbrakes_found[param] = varname
+                     elseif readLvar(varname) >= val and not FSL[_varname].inc and not FSL[_varname].tgl then
+                        print("Assigning " .. param .. " to " .. varname, "inc")
+                        FSL[_varname].inc = param
+                        rotorbrakes_found[param] = varname
+                     end
+                  end
+                  if not rotorbrakes_found[param] then
+                     rotorbrakes_found[param] = -1
+                     print("Param " .. param .. " controls a control which is already assigned another param")
+                  end
+               end
+            end
+
+         until ipc.elapsedtime() - time > 1000 or found
+
+         if not rotorbrakes_found[param] then
+            print("Nothing found for " .. param .. " :(") 
+         end
+
+      elseif rotorbrakes_found[param] == -1 then
+         print("Param " .. param .. " controls a control which is already assigned another param")
+      else
+         print("Already assigned " .. param .. " to " .. rotorbrakes_found[param])
+      end
 
    end
 
@@ -927,40 +1042,37 @@ function findRange()
    for _,control in pairs(FSL) do
       local varname = control.var
       local readLvar = ipc.readLvar
-      if (varname:find("Knob") or varname:find("VC_WINDOW_CPT") or varname:find("VC_WINDOW_FO") or varname:find("BLIND") or varname:find("SEAT")) and control.inc and control.dec then
+      if varname:find("Knob") and control.inc and control.dec then
 
-         local wait
-         if varname:find("Knob") then wait = 5000 else wait = 10000 end
-
-         control.range = {}
-
-         local tired
-         local startTime = ipc.elapsedtime()
+         local pos, newPos, range
 
          repeat
-            local pos = readLvar(varname)
-            ipc.control(rotorbrake, control.dec)
-            ipc.sleep(5)
-            local newPos = readLvar(varname)
-            tired = ipc.elapsedtime() - startTime > wait
-         until (newPos == pos) or tired
-
-         if not tired then control.range[1] = readLvar(varname) end
-
-         local tired
-         local startTime = ipc.elapsedtime()
-
-         repeat
-            local pos = readLvar(varname)
+            pos = readLvar(varname)
             ipc.control(rotorbrake, control.inc)
-            ipc.sleep(5)
-            local newPos = readLvar(varname)
-            tired = ipc.elapsedtime() - startTime > wait
-         until (newPos == pos) or tired
+            ipc.sleep(200)
+            newPos = readLvar(varname)
+         until newPos <= pos
 
-         if not tired then control.range[2] = readLvar(varname) end
+         if newPos < pos then newPos = 360 end
+
+         
+         print("Range of control " .. varname .. " = " .. newPos)
+         control.range = newPos
 
       end
+   end
+end
+
+function findGuarded(startparam,endparam)
+   local gotGuards
+   for varname,control in pairs(FSL) do
+      if varname:find("Guard") and (control.inc or control.tgl) then
+         gotGuards = true 
+      end
+   end
+   if gotGuards then
+      parse(startparam,endparam,true)
+      parse(endparam,startparam,true)
    end
 end
 
@@ -969,56 +1081,35 @@ function main (startparam, endparam)
    parse(startparam,endparam)
    parse(endparam,startparam)
 
-   findRange()
-
-   for varname in pairs(FSL) do
-      if not FSL[varname].dec or not FSL[varname].inc then
-         FSL[varname].tgl = FSL[varname].dec or FSL[varname].inc
-         FSL[varname].dec = nil
-         FSL[varname].inc = nil
-      elseif FSL[varname].dec and FSL[varname].inc and not FSL[varname].range then
-
-         local wait = 1000
-
-         local pos = ipc.readLvar(FSL[varname].var)
-
-         ipc.control(rotorbrake,FSL[varname].inc)
-
-         local time = ipc.elapsedtime()
-
-         repeat until ipc.readLvar(FSL[varname].var) ~= pos or ipc.elapsedtime() - time > wait
-
-         local newPos = ipc.readLvar(FSL[varname].var)
-
-         if newPos ~= pos then
-
-            ipc.control(rotorbrake,FSL[varname].inc)
-
-            local time = ipc.elapsedtime()
-
-            repeat until ipc.readLvar(FSL[varname].var) ~= newPos or ipc.elapsedtime() - time > wait
-
-            newPos = ipc.readLvar(FSL[varname].var)
-
-            if newPos == pos then
-               FSL[varname].tgl = FSL[varname].inc
-               FSL[varname].dec = nil
-               FSL[varname].inc = nil
-            end
-         end
-      end
-   end
-
-   local FSL_JSON = json.stringify(FSL)
-   local filename = "FSL.json"
-   io.open(filename,"w"):close()
-   local file = io.open(filename,"a")
-   io.input(file)
-   io.output(file)
-   io.write(FSL_JSON)
+   findGuarded(startparam,endparam)
 
 end
 
-main(71000,71050)
+--main(71000,71310) -- FCU
+main(72000,72100) -- OVHD
+--main(75000,75200) -- MIP
+--main(76000,76100)
+--main(77000,78750)
+
+findRange()
+
+for varname in pairs(FSL) do
+   if not FSL[varname].dec and not FSL[varname].inc and not FSL[varname].tgl then FSL[varname] = nil end
+   if FSL[varname] then 
+      if (not FSL[varname].dec or not FSL[varname].inc) and not FSL[varname].tgl then
+         FSL[varname].tgl = FSL[varname].dec or FSL[varname].inc
+         if FSL[varname].dec then FSL[varname].dec = nil end
+         if FSL[varname].inc then FSL[varname].inc = nil end
+      end
+   end
+end
+
+local FSL_JSON = json.stringify(FSL)
+local filename = "FSL.json"
+io.open(filename,"w"):close()
+local file = io.open(filename,"a")
+io.input(file)
+io.output(file)
+io.write(FSL_JSON)
 
 print("FSL2JSON finished!")
