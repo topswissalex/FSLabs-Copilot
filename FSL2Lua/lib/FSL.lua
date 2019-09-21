@@ -194,7 +194,7 @@ local Control = {
 
    push = function(self) if self.pushctrl then ipc.control(rotorbrake,self.pushctrl) end end,
 
-   pull = function(self) if self.pullctrl then ipc.control(rotorbrake,self.pullctrl) end end,
+   pull = function(self) if self.pullctrl then ipc.control(rotorbrake,self.pullctrl) end end
 
 }
 
@@ -241,7 +241,9 @@ local FSL = {
       if side == 1 then _side = "CPT" elseif side == 2 then _side = "FO" end
       self[_side].PED_MCDU_KEY_PERF()
       ipc.sleep(500)
-      return tonumber(self.MCDU.getDisplay(side,162,162))
+      local setting = self.MCDU.getDisplay(side,162,162)
+      self[_side].PED_MCDU_KEY_FPLN()
+      return tonumber(setting)
    end,
    
    bird = function()
@@ -269,7 +271,7 @@ local FSL = {
          return display -- either - if no startpos is specified - the whole display as an array, or a string from startpos to either endpos or the end of the display if no endpos is specified
       end
 
-   },
+   }
 
 }
 
@@ -406,6 +408,7 @@ do
    local path
    while true do
       local line = io.read()
+      if not line then break end
       local index = line:find("\\FSLabs\\SimObjects")
       if index then
          local type
@@ -413,7 +416,7 @@ do
          elseif ipc.readLvar("AIRCRAFT_A320") == 1 then type = "A320"
          elseif ipc.readLvar("AIRCRAFT_A321") == 1 then type = "A321" end
          path = line:sub(1, index) .. "FSLabs\\" .. type .. "\\Data\\ATSU\\ATSU.log"
-         path = line:sub(1, index) .. "FSLabs\\" .. type .. "\\Data\\ATSU\\test.log"
+         --path = line:sub(1, index) .. "FSLabs\\" .. type .. "\\Data\\ATSU\\test.log"
          FSL.atsuLog.path = path:sub(path:find("%u"), #path)
          break
       end

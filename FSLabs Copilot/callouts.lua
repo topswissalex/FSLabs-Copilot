@@ -38,13 +38,15 @@ local callouts = {
 
       while onGround() and not enginesRunning() do sleep() end
 
+      log("At least one engine running")
+
       if onGround() then
          local co_flightControlsCheck = coroutine.create(function() self:flightControlsCheck() end)
          local co_brakeCheck = coroutine.create(function() self:brakeCheck() end)
          repeat sleep(5)
             local flightControlsCheckedOrSkipped = self.flightControlsChecked or not coroutine.resume(co_flightControlsCheck)
             local brakesCheckedOrSkipped = self.brakesChecked or not coroutine.resume(co_brakeCheck)
-         until flightControlsCheckedOrSkipped and brakesCheckedOrSkipped
+         until (flightControlsCheckedOrSkipped and brakesCheckedOrSkipped) or thrustLeversSetForTakeoff()
       end
 
       if onGround() then
@@ -389,6 +391,12 @@ callouts.flightControlsCheck = {
          self.fullLeftRudderTravel = 1499
          self.fullRightRudderTravel = 3000
       end
+
+      repeat coroutine.yield() until enginesRunning(1)
+
+      local refTime = currTime()
+
+      repeat coroutine.yield() until currTime() - refTime > 30000
 
       if PM_announces_flightcontrol_check == 0 then return end
 

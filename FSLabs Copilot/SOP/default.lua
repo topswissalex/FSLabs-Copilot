@@ -77,7 +77,7 @@ end
 function afterLandingCleanup()
    FSL.PED_FLAP_LEVER("0")
    FSL.PED_ATCXPDR_MODE_Switch("STBY")
-   FSL.OVHD_EXTLT_Strobe_Switch("OFF")
+   FSL.OVHD_EXTLT_Strobe_Switch("AUTO")
    FSL.OVHD_EXTLT_RwyTurnoff_Switch("OFF")
    FSL.OVHD_EXTLT_Land_L_Switch("RETR")
    FSL.OVHD_EXTLT_Land_R_Switch("RETR")

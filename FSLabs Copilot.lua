@@ -90,12 +90,13 @@ function thrustLeversSetForTakeoff()
    return TL1 < TL_reverseThreshold and TL1 >= TL_takeoffThreshold and TL2 < TL_reverseThreshold and TL2 >= TL_takeoffThreshold
 end
 
-function enginesRunning()
-   local eng1_N1 = ipc.readUW(0x0898) * 100 / 16384
-   local eng2_N1 = ipc.readUW(0x0930) * 100 / 16384
-   local eng1_running = eng1_N1 > 15
-   local eng2_running = eng2_N1 > 15
-   return eng1_running or eng2_running
+function enginesRunning(both)
+   local fuelFlow_1 = ipc.readDBL(0x2020)
+   local fuelFlow_2 = ipc.readDBL(0x2120)
+   local eng1_running = fuelFlow_1 > 0
+   local eng2_running = fuelFlow_2 > 0
+   if both then return eng1_running and eng2_running
+   else return eng1_running or eng2_running end
 end
 
 function takeoffThrustIsSet()
