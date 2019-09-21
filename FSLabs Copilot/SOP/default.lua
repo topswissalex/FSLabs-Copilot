@@ -60,7 +60,10 @@ function afterTakeoffSequence()
    if not FSL.OVHD_AC_Pack_1_Button:isDown() then FSL.OVHD_AC_Pack_1_Button() hand:rest() end
    sleep(plusminus(10000,0.2))
    if not FSL.OVHD_AC_Pack_2_Button:isDown() then FSL.OVHD_AC_Pack_2_Button() hand:rest() end
-   repeat sleep() until readLvar("FSLA320_slat_l_1") == 0
+   repeat 
+      sleep() 
+      if onGround() then return end
+   until readLvar("FSLA320_slat_l_1") == 0
    sleep(plusminus(2000,0.5))
    FSL.PED_SPD_BRK_LEVER("RET")
    hand:rest()

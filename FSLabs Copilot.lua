@@ -16,7 +16,7 @@ PM_announces_brake_check = 1 -- PM announces 'brake pressure zero' after the bra
 
 -- Actions:
 
-enable_actions = 0 -- allow the PM to perform the procedures that are listed below
+enable_actions = 1 -- allow the PM to perform the procedures that are listed below
 SOP = "default"
 
 -- Enable or disable individual procedures in the default SOP and change their related options:
@@ -37,7 +37,7 @@ pack2_off_after_landing = 0
 rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
 
 FSL2Lua_pilot = PM
-FSL2Lua_log = 0
+FSL2Lua_log = 1
 FSL = require "FSL2Lua"
 
 readLvar = ipc.readLvar

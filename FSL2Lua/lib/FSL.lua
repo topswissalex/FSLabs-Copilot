@@ -144,6 +144,7 @@ local Control = {
    end,
 
    set = function(self,targetPos)
+      if not targetPos then return end
       local sleepTime = 5
       if self.range and type(targetPos) == "number" then
          targetPos = self.range / 100 * targetPos
@@ -224,8 +225,8 @@ local FSL = {
    end,
 
    setTakeoffFlaps = function(self)
-      local setting = tostring(self.atsuLog:takeoffFlaps() or self:getTakeoffFlapsFromMcdu())
-      self.PED_FLAP_LEVER(setting)
+      local setting = self.atsuLog:takeoffFlaps() or self:getTakeoffFlapsFromMcdu()
+      if setting then self.PED_FLAP_LEVER(tostring(setting)) end
       return setting
    end,
 
@@ -296,7 +297,7 @@ FSL.trimwheel = {
       if not CG then return end
       if not step then
          if not CG_man and prob(0.1) then log("Looking for the loadsheet") ipc.sleep(plusminus(10000,0.5)) end
-         log("Setting the trim. MACTOW: " .. CG, 1)
+         log("Setting the trim. CG: " .. CG, 1)
          log("Position of the trimwheel: x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z))
          local reachtime = hand:moveto(self.pos) 
          log("Trim wheel reached in " .. math.floor(reachtime) .. " ms")
@@ -327,8 +328,12 @@ FSL.trimwheel = {
 
 }
 
-if pilot == 1 then FSL.trimwheel.pos.x = 90 
-elseif pilot == 2 then FSL.trimwheel.pos.x = 300 end
+do
+   local pos = FSL.trimwheel.pos
+   if pilot == 1 then pos.x = 90 
+   elseif pilot == 2 then pos.x = 300 end
+   FSL.trimwheel.pos = maf.vector(pos.x, pos.y, pos.z)
+end
 
 FSL.atsuLog = {
 
@@ -401,7 +406,6 @@ do
    local path
    while true do
       local line = io.read()
-      if not line:find("\\FSLabs\\SimObjects") then break end
       local index = line:find("\\FSLabs\\SimObjects")
       if index then
          local type
@@ -409,7 +413,7 @@ do
          elseif ipc.readLvar("AIRCRAFT_A320") == 1 then type = "A320"
          elseif ipc.readLvar("AIRCRAFT_A321") == 1 then type = "A321" end
          path = line:sub(1, index) .. "FSLabs\\" .. type .. "\\Data\\ATSU\\ATSU.log"
-         --path = line:sub(1, index) .. "FSLabs\\" .. type .. "\\Data\\ATSU\\test.log"
+         path = line:sub(1, index) .. "FSLabs\\" .. type .. "\\Data\\ATSU\\test.log"
          FSL.atsuLog.path = path:sub(path:find("%u"), #path)
          break
       end
@@ -433,14 +437,31 @@ end
 -- Main ---------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
-function initPos(control)
+local rawControls = rootdir .. "FSL2Lua\\lib\\FSL.json"
+io.input(rawControls)
+rawControls = json.parse(io.read())
+
+function initPos(varname,control)
    local pos = control.pos
+   local mirror = {
+      MCDU_R = "MCDU_L",
+      COMM_2 = "COMM_1",
+      RADIO_2 = "RADIO_1",
+   }
+   for k,v in pairs(mirror) do
+      if varname:find(k) then
+         pos = rawControls[varname:gsub(k,v)].pos
+         if pos.x and pos.x ~= "" then
+            pos.x = tonumber(pos.x) + 370
+         end
+      end
+   end
    pos = maf.vector(tonumber(pos.x), tonumber(pos.y), tonumber(pos.z))
    local ref = {
       --0,0,0 is at the bottom left corner of the pedestal's top side
-      OVHD = {maf.vector(39,730,1070), 2.75762}, --bottom left corner (the one that is part of the bottom edge)
-      --MIP = {maf.vector(), 0},
-      GSLD = {maf.vector(-424, 663, 527), 1.32645} --bottom left corner of the panel with the autoland button
+      OVHD = {maf.vector(39, 730, 1070), 2.75762}, -- bottom left corner (the one that is part of the bottom edge)
+      MIP = {maf.vector(0, 792, 59), 1.32645}, -- left end of the edge that meets the pedestal
+      GSLD = {maf.vector(-424, 663, 527), 1.32645} -- bottom left corner of the panel with the autoland button
    }
    for section,refpos in pairs(ref) do
       if control.var:find(section) then
@@ -451,12 +472,8 @@ function initPos(control)
    return pos
 end
 
-local rawControls = rootdir .. "FSL2Lua\\lib\\FSL.json"
-io.input(rawControls)
-rawControls = json.parse(io.read())
-
 for varname,control in pairs(rawControls) do
-   control.pos = initPos(control)
+   control.pos = initPos(varname,control)
    local replace = {
       CPT = {
          MCDU_L = "MCDU",

@@ -347,9 +347,10 @@ local callouts = {
          local brakesChecked
 
          if not pushback and groundSpeed() > 0.5 and leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
-            sleep(2000)
+            sleep(1000)
             if leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
                if leftPressure == 0 and rightPressure == 0 then
+                  sleep(plusminus(1000))
                   play("pressureZero")
                   brakesChecked = true
                elseif leftPressure > 0 or rightPressure > 0 then
@@ -380,6 +381,14 @@ callouts.flightControlsCheck = {
    end,
 
    __call = function(self)
+
+      if ipc.readLvar("AIRCRAFT_A319") == 1 then
+         self.fullLeftRudderTravel = 1243
+         self.fullRightRudderTravel = 2743
+      elseif ipc.readLvar("AIRCRAFT_A320") == 1 then
+         self.fullLeftRudderTravel = 1499
+         self.fullRightRudderTravel = 3000
+      end
 
       if PM_announces_flightcontrol_check == 0 then return end
 
@@ -515,11 +524,11 @@ callouts.flightControlsCheck = {
    end,
 
    fullLeftRud = function(self)
-      return readLvar("FSLA320_rudder") < 1500 and 1500 - readLvar("FSLA320_rudder") < self.rudderTolerance
+      return readLvar("FSLA320_rudder") <= self.fullLeftRudderTravel and self.fullLeftRudderTravel - readLvar("FSLA320_rudder") < self.rudderTolerance
    end,
 
    fullRightRud = function(self)
-      return 3000 - readLvar("FSLA320_rudder") < self.rudderTolerance
+      return self.fullRightRudderTravel - readLvar("FSLA320_rudder") < self.rudderTolerance
    end,
 
    stickNeutral = function(self)
