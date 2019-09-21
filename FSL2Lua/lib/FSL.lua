@@ -11,6 +11,11 @@ local human = FSL2Lua_do_sequences or human or false
 if not pilot then human = false end
 local logging = FSL2Lua_log == 1
 
+local ac_type
+if ipc.readLvar("AIRCRAFT_A319") == 1 then ac_type = "A319"
+elseif ipc.readLvar("AIRCRAFT_A320") == 1 then ac_type = "A320"
+elseif ipc.readLvar("AIRCRAFT_A321") == 1 then ac_type = "A321" end
+
 -----------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
@@ -285,10 +290,18 @@ FSL.trimwheel = {
    getInd = function(self)
       ipc.sleep(5)
       local CG_ind = ipc.readLvar(self.var)
-      if CG_ind <= 1800 and CG_ind > 460 then
-         CG_ind = CG_ind * 0.045 - 52.9
-      else
-         CG_ind = CG_ind * 0.104 + 28.54
+      if ac_type == "A320" then
+         if CG_ind <= 1800 and CG_ind > 460 then
+            CG_ind = CG_ind * 0.0482226 - 58.19543
+         else
+            CG_ind = CG_ind * 0.1086252 + 28.50924
+         end
+      elseif ac_type == "A319" then
+         if CG_ind <= 1800 and CG_ind > 460 then
+            CG_ind = CG_ind * 0.04687107 - 53.76288
+         else
+            CG_ind = CG_ind * 0.09844237 + 30.46262
+         end
       end
       return CG_ind
    end,
@@ -300,9 +313,11 @@ FSL.trimwheel = {
       if not step then
          if not CG_man and prob(0.1) then log("Looking for the loadsheet") ipc.sleep(plusminus(10000,0.5)) end
          log("Setting the trim. CG: " .. CG, 1)
-         log("Position of the trimwheel: x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z))
-         local reachtime = hand:moveto(self.pos) 
-         log("Trim wheel reached in " .. math.floor(reachtime) .. " ms")
+         if human then
+            log("Position of the trimwheel: x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z))
+            local reachtime = hand:moveto(self.pos) 
+            log("Trim wheel reached in " .. math.floor(reachtime) .. " ms")
+         end
       end
       repeat
          local CG_ind = self:getInd()
@@ -411,12 +426,8 @@ do
       if not line then break end
       local index = line:find("\\FSLabs\\SimObjects")
       if index then
-         local type
-         if ipc.readLvar("AIRCRAFT_A319") == 1 then type = "A319"
-         elseif ipc.readLvar("AIRCRAFT_A320") == 1 then type = "A320"
-         elseif ipc.readLvar("AIRCRAFT_A321") == 1 then type = "A321" end
-         path = line:sub(1, index) .. "FSLabs\\" .. type .. "\\Data\\ATSU\\ATSU.log"
-         --path = line:sub(1, index) .. "FSLabs\\" .. type .. "\\Data\\ATSU\\test.log"
+         path = line:sub(1, index) .. "FSLabs\\" .. ac_type .. "\\Data\\ATSU\\ATSU.log"
+         --path = line:sub(1, index) .. "FSLabs\\" .. ac_type .. "\\Data\\ATSU\\test.log"
          FSL.atsuLog.path = path:sub(path:find("%u"), #path)
          break
       end

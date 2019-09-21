@@ -16,7 +16,7 @@ end
 function afterStartSequence()
    FSL.PED_SPD_BRK_LEVER("ARM")
    FSL:setTakeoffFlaps() -- first checks the ATSU log. if nothing is there, checks the MCDU PERF page.
-   repeat sleep() until not pushback() -- because GSX messes with setting the trim during pushback
+   repeat sleep() until not GSX_pushback() -- because GSX messes with setting the trim during pushback
    FSL.trimwheel:set() -- sets the trim using the final loadsheet MACTOW from the ATSU log
    hand:rest()
 end

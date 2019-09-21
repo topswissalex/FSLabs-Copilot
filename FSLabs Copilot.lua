@@ -75,7 +75,7 @@ function log(str,onlyMsg)
 end
 
 function sleep(time) ipc.sleep(time or 100) end
-function pushback() return readLvar("FSLA320_NWS_Pin") == 1 end
+function GSX_pushback() return readLvar("FSLA320_NWS_Pin") == 1 and not readLvar("FSDT_GSX_DEPARTURE_STATE") == 6 end
 function onGround() return ipc.readUB(0x0366) == 1 end
 function groundSpeed() return ipc.readUD(0x02B4) / 65536 * 3600 / 1852 end
 function ALT() return ipc.readUD(0x31E4) / 65536 end
@@ -100,9 +100,22 @@ function enginesRunning(both)
 end
 
 function takeoffThrustIsSet()
-   local eng1_N1 = ipc.readUW(0x0898) * 100 / 16384
-   local eng2_N1 = ipc.readUW(0x0930) * 100 / 16384
-   return eng1_N1 > 80 and eng2_N1 > 80
+   local eng1_N1 = ipc.readDBL(0x2010)
+   local eng2_N1 = ipc.readDBL(0x2110)
+   if eng1_N1 > 80 and eng2_N1 > 80 then
+      local eng1_N1_prev = eng1_N1
+      local eng2_N1_prev = eng2_N1
+      while true do
+         sleep(plusminus(1200,0.2))
+         eng1_N1 = ipc.readDBL(0x2010)
+         eng2_N1 = ipc.readDBL(0x2110)
+         local stable = eng1_N1 > 80 and eng2_N1 > 80 and math.abs(eng1_N1 - eng1_N1_prev) < 1 and math.abs(eng1_N1 - eng1_N1_prev) < 1
+         eng1_N1_prev = eng1_N1
+         eng2_N1_prev = eng2_N1
+         if stable then return true
+         elseif not thrustLeversSetForTakeoff() then return false end
+      end
+   end
 end
 
 function getTakeoffSpeedsFromMCDU()
