@@ -17,7 +17,8 @@ local reactionTime = 300
 local callouts = {
 
    init = function(self)
-      if not self.firstRun then log("RESETTING") end
+      if not self.firstRun then log("Callouts resettings")
+      else log("Callouts initializing") end
       self.airborne = not onGround()
       self.takeoffAbortedAtTime = nil
       self.latestTouchdownAtTime = nil

@@ -49,7 +49,7 @@ sound_path = "..\\Modules\\FSLabs Copilot\\Sounds"
 
 local logging = true
 local logFile = rootdir .. "FSLabs Copilot\\FSLabs Copilot.log"
-io.open(logFile,"w"):close()
+if not package.loaded["FSLabs Copilot"] then io.open(logFile,"w"):close() end
 
 function log(str,onlyMsg)
    if not logging then return end

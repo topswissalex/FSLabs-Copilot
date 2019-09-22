@@ -162,12 +162,23 @@ local Control = {
          while true do
             currPos = self:getVar()
             if currPos < targetPos then
-               if self.tgl then ipc.control(rotorbrake, self.tgl)
+               if self.control then ipc.control(self.control.inc)
+               elseif self.tgl then ipc.control(rotorbrake, self.tgl)
                else ipc.control(rotorbrake, self.inc) end
             elseif currPos > targetPos then
-               if self.tgl then ipc.control(rotorbrake, self.tgl)
+               if self.control then ipc.control(self.control.dec)
+               elseif self.tgl then ipc.control(rotorbrake, self.tgl)
                else ipc.control(rotorbrake, self.dec) end
-            else break end
+            else
+               if self.hidepointer then
+                  local x,y = mouse.getpos()
+                  mouse.move(x+1,y+1)
+                  mouse.move(x,y)
+                  ipc.sleep(10)
+                  ipc.control(1139)
+               end
+               break
+            end
             local t = plusminus(sleepTime)
             ipc.sleep(t) 
             if human then log("Interaction with the control took " .. t .. " ms") end
@@ -282,8 +293,7 @@ local FSL = {
 
 FSL.trimwheel = {
 
-   inc = 78375,
-   dec = 78376,
+   control = {inc = 65607, dec = 65615},
    pos = {y = 500, z = 70},
    var = "VC_PED_trim_wheel_ind",
 
@@ -330,11 +340,11 @@ FSL.trimwheel = {
          if step and time > 70 then time = 70 end
          if CG > CG_ind then
             if dist > 3.1 then self:set(CG_ind + 3,1) ipc.sleep(plusminus(350,0.2)) end
-            ipc.control(rotorbrake,self.inc)
+            ipc.control(self.control.inc)
             ipc.sleep(time - 5)
          elseif CG < CG_ind then
             if dist > 3.1 then self:set(CG_ind - 3,1) ipc.sleep(plusminus(350,0.2)) end
-            ipc.control(rotorbrake,self.dec)
+            ipc.control(self.control.dec)
             ipc.sleep(time - 5)
          end
          local trimIsSet = math.abs(CG - CG_ind) <= 0.2
@@ -488,6 +498,7 @@ end
 
 for varname,control in pairs(rawControls) do
    control.pos = initPos(varname,control)
+   if varname:find("Knob") or varname:find("KNOB") then control.hidepointer = true end
    local replace = {
       CPT = {
          MCDU_L = "MCDU",
