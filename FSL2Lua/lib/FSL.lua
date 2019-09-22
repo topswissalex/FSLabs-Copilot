@@ -74,9 +74,10 @@ hand = {
    speed = function(dist)
       log("Distance: " .. math.floor(dist) .. " mm")
       if dist < 80 then dist = 80 end
-      local speed = plusminus ((5.54785 + (-218.97685 / (1 + (dist / (3.62192 * 10^-19))^0.0786721))),0.1)
+      local speed = 5.54785 + (-218.97685 / (1 + (dist / (3.62192 * 10^-19))^0.0786721))
+      speed = plusminus(speed,0.1)
       log("Speed: " .. math.floor(speed * 1000) .. " mm/s")
-      return plusminus(speed)
+      return speed
    end,
 
    moveto = function(self,newpos)
@@ -154,7 +155,7 @@ local Control = {
       if self.range and type(targetPos) == "number" then
          targetPos = self.range / 100 * targetPos
       elseif type(targetPos) == "string" then
-         if human then sleepTime = self.time or 300 end
+         if human then sleepTime = self.time or 100 end
          targetPos = self.posn[targetPos:upper()]
       end
       local currPos = self:getVar()
@@ -450,12 +451,12 @@ end
 
 keyBindCount = 0
 
-function keyBind(keycode,func,cond,shifts)
+function keyBind(keycode,func,cond,shifts,downup)
    cond = cond or function() return true end
    keyBindCount = keyBindCount + 1
    local funcName = "keyBind" .. keyBindCount
    _G[funcName] = function() if cond() then func() end end
-   event.key(keycode,shifts,funcName)
+   event.key(keycode,shifts,1 or downup,funcName)
 end
 
 -- Main ---------------------------------------------------------------------------------
@@ -470,7 +471,7 @@ function initPos(varname,control)
    local mirror = {
       MCDU_R = "MCDU_L",
       COMM_2 = "COMM_1",
-      RADIO_2 = "RADIO_1",
+      RADIO_2 = "RADIO_1"
    }
    for k,v in pairs(mirror) do
       if varname:find(k) then

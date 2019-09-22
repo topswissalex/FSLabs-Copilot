@@ -102,14 +102,16 @@ end
 function takeoffThrustIsSet()
    local eng1_N1 = ipc.readDBL(0x2010)
    local eng2_N1 = ipc.readDBL(0x2110)
+   local N1_window = 0.1
+   local timeWindow = 1000
    if eng1_N1 > 80 and eng2_N1 > 80 then
       local eng1_N1_prev = eng1_N1
       local eng2_N1_prev = eng2_N1
       while true do
-         sleep(plusminus(1200,0.2))
+         sleep(plusminus(timeWindow,0.2))
          eng1_N1 = ipc.readDBL(0x2010)
          eng2_N1 = ipc.readDBL(0x2110)
-         local stable = eng1_N1 > 80 and eng2_N1 > 80 and math.abs(eng1_N1 - eng1_N1_prev) < 1 and math.abs(eng1_N1 - eng1_N1_prev) < 1
+         local stable = eng1_N1 > 80 and eng2_N1 > 80 and math.abs(eng1_N1 - eng1_N1_prev) < N1_window and math.abs(eng1_N1 - eng1_N1_prev) < N1_window
          eng1_N1_prev = eng1_N1
          eng2_N1_prev = eng2_N1
          if stable then return true
@@ -158,11 +160,13 @@ do
    else PM = "First Officer" end
    if play_V1 == 1 then play_V1 = "Yes"
    else play_V1 = "No" end
+   if enable_actions == 1 then enable_actions = "Enabled"
+   elseif enable_actions == 0 then enable_actions = "Disabled" end
    log(">>>>>> Script started <<<<<<")
    log("Play V1 callout: " .. play_V1)
    log("Pilot Monitoring: " .. PM)
    log("----------------------------------------------------------------------------------------",1)
    log("----------------------------------------------------------------------------------------",1)
-   local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. play_V1 .. "\n\nCallouts volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM
-   if show_startup_message == 1 then ipc.display(msg,20) sleep(20000) end
+   local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. play_V1 .. "\n\nCallouts volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM .."\n\nActions: " .. enable_actions
+   if show_startup_message == 1 then ipc.display(msg) sleep(20000) end
 end

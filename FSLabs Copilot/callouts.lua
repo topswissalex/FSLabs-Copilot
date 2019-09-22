@@ -209,7 +209,6 @@ local callouts = {
       local skipThis = not thrustSet and IAS() > 80
       if thrustSet then
          self.takeoffThrustWasSet = true
-         sleep(800) -- wait for further spool up
          play("thrustSet")
          log("Thrust set")
       elseif skipThis then
@@ -350,7 +349,7 @@ local callouts = {
          local brakesChecked
 
          if not pushback and groundSpeed() > 0.5 and leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
-            sleep(1000)
+            sleep(500)
             if leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
                if leftPressure == 0 and rightPressure == 0 then
                   sleep(plusminus(1000))
