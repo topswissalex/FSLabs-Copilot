@@ -2,14 +2,16 @@
 -- ############ EDIT USER OPTIONS HERE ##############################
 -- ##################################################################
 
+voice_control = 1
+
 -- Callouts:
 
-volume = 65
+volume = 60
 remote_port = 8080 -- The port of the remote MCDU. Only change it here if you changed it in the FSLabs options
 play_V1 = 1 -- play V1 sound? 0 = no, 1 = yes
 V1_timing = 0 -- V1 will be announced at the speed of V1 - V1_timing. If you want V1 to be announced slightly before V1 is reached on the PFD, type the number of knots.
 PM = 2 -- Pilot Monitoring: 1 = Captain, 2 = First Officer
-show_startup_message = 1 -- Show startup message? 0 = no, 1 = yes
+show_startup_message = 0 -- Show startup message? 0 = no, 1 = yes
 sound_device = 0 -- zero is default (only change this if no sounds are played)
 PM_announces_flightcontrol_check = 1 -- PM announces 'full left', 'full right' etc.
 PM_announces_brake_check = 1 -- PM announces 'brake pressure zero' after the brake check. The trigger is the first application of the brakes after you start moving
@@ -17,16 +19,19 @@ PM_announces_brake_check = 1 -- PM announces 'brake pressure zero' after the bra
 -- Actions:
 
 enable_actions = 1 -- allow the PM to perform the procedures that are listed below
-SOP = "default"
 
--- Enable or disable individual procedures in the default SOP and change their related options:
+-- Enable or disable individual procedures and change their related options:
 
-after_start = 1 -- triggered when at least one engine is running and the engine mode selector is in the 'NORM' position
-during_taxi = 1 -- the PM will press the AUTO BRK and TO CONFIG buttons after you've done the brake and flight controls checks
-lineup = 1 -- triggered by cycling the seat belts sign switch twice within 2 seconds
-after_takeoff = 1 -- triggered by moving the thrust levers back into the 'CLB' detent
-after_landing = 1 -- triggered when the ground speed is less than 30 kts and you have disarmed the spoilers
+after_start = 1
+during_taxi = 1 
+lineup = 1
+takeoff_sequence = 1 
+after_takeoff = 1
+ten_thousand_dep = 1
+ten_thousand_arr = 1
+after_landing = 1
 
+after_landing_trigger = 1 -- only concerns voice control. 1 = the procedure will be triggered by a voice command, 2 = the procedure will be triggered by you disarming the spoilers
 packs_on_takeoff = 0 -- 1 = takeoff with the packs on. This option will be ignored if a performance request is found in the ATSU log
 pack2_off_after_landing = 0
 
@@ -39,6 +44,7 @@ rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
 FSL2Lua_pilot = PM
 FSL2Lua_log = 1
 FSL = require "FSL2Lua"
+SOP = "default"
 
 readLvar = ipc.readLvar
 currTime = ipc.elapsedtime
@@ -78,10 +84,13 @@ function sleep(time) ipc.sleep(time or 100) end
 function GSX_pushback() return readLvar("FSLA320_NWS_Pin") == 1 and not readLvar("FSDT_GSX_DEPARTURE_STATE") == 6 end
 function onGround() return ipc.readUB(0x0366) == 1 end
 function groundSpeed() return ipc.readUD(0x02B4) / 65536 * 3600 / 1852 end
-function ALT() return ipc.readUD(0x31E4) / 65536 end
+function radALT() return ipc.readUD(0x31E4) / 65536 end
 function IAS() return ipc.readUW(0x02BC) / 128 end
 function timePassedSince(ref) return currTime() - ref end
 function reverseSelected() return readLvar("VC_PED_TL_1") > 100 and readLvar("VC_PED_TL_2") > 100 end
+function climbing() return ipc.readSW(0x0842) < 0 end
+function descending() return ipc.readSW(0x0842) > 0 end
+function ALT() return ipc.readSD(0x3324) end
 
 function thrustLeversSetForTakeoff()
    local TL_takeoffThreshold = 26
@@ -120,18 +129,6 @@ function takeoffThrustIsSet()
    end
 end
 
-function getTakeoffSpeedsFromMCDU()
-   FSL.PED_MCDU_KEY_PERF()
-   sleep(500)
-   local V1 = tonumber(FSL.MCDU.getDisplay(PM,49,51))
-   local Vr = tonumber(FSL.MCDU.getDisplay(PM,97,99))
-   sleep(1000)
-   FSL.PED_MCDU_KEY_FPLN()
-   if not V1 then log("V1 hasn't been entered") end
-   if not Vr then log("Vr hasn't been entered") end
-   return V1, Vr
-end
-
 local previousCalloutEndTime
 
 function play(fileName,length)
@@ -150,7 +147,18 @@ sound.path(sound_path)
 
 if package.loaded["FSLabs Copilot"] then return end
 
-if enable_actions == 1 then ipc.runlua("FSLabs Copilot\\SOP\\" .. SOP) end
+if enable_actions == 1 then ipc.runlua("FSLabs Copilot\\Actions\\" .. SOP) end
+if voice_control == 1 then
+   function mute(flag)
+      if ipc.testflag(flag) then ipc.set("FSLC_mute",1)
+      else sleep(1000) ipc.set("FSLC_mute",0) end
+   end
+   event.flag(1,"mute")
+   ipc.runlua("FSLabs Copilot\\voice\\voice.lua") 
+   if not ext.isrunning("FSLCopilot_voice.exe") then
+      ext.shell("FSLabs Copilot\\voice\\FSLCopilot_voice.exe",EXT_KILL)
+   end
+end
 ipc.runlua("FSLabs Copilot\\callouts")
 
 do
@@ -170,3 +178,4 @@ do
    local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. play_V1 .. "\n\nCallouts volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM .."\n\nActions: " .. enable_actions
    if show_startup_message == 1 then ipc.display(msg) sleep(20000) end
 end
+

@@ -14,6 +14,18 @@ local reactionTime = 300
 -----------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
+function getTakeoffSpeedsFromMCDU()
+   FSL.PED_MCDU_KEY_PERF()
+   sleep(500)
+   local V1 = tonumber(FSL.MCDU:getString(PM,49,51))
+   local Vr = tonumber(FSL.MCDU:getString(PM,97,99))
+   sleep(1000)
+   FSL.PED_MCDU_KEY_FPLN()
+   if not V1 then log("V1 hasn't been entered") end
+   if not Vr then log("Vr hasn't been entered") end
+   return V1, Vr
+end
+
 local callouts = {
 
    init = function(self)
@@ -21,6 +33,9 @@ local callouts = {
       else log("Callouts initializing") end
       self.airborne = not onGround()
       self.takeoffAbortedAtTime = nil
+      ipc.set("takeoffAborted",nil)
+      ipc.set("takeoffAtTime",nil)
+      ipc.set("descending",nil)
       self.latestTouchdownAtTime = nil
       self.landedAtTime = nil
       self.noReverseTimeRef = nil
@@ -68,6 +83,7 @@ local callouts = {
 
       while not onGround() do
          if not self.airborne then self.airborne = true end
+         if math.abs(ALT() - 10000) < 1000 and descending() and not ipc.get("descending") then ipc.set("descending",1) end
          sleep()
       end
 
@@ -91,6 +107,7 @@ local callouts = {
             self.takeoffThrustWasSet = false
             self.cancelCountDownStart = nil
             self.takeoffAbortedAtTime = currTime()
+            ipc.set("takeoffAborted",1)
             return false, true 
          end
          if not self.cancelCountDownStart then
@@ -205,7 +222,7 @@ local callouts = {
    end,
 
    thrustSet = function(self)
-      local thrustSet = ALT() < 10 and takeoffThrustIsSet()
+      local thrustSet = radALT() < 10 and takeoffThrustIsSet()
       local skipThis = not thrustSet and IAS() > 80
       if thrustSet then
          self.takeoffThrustWasSet = true
@@ -218,7 +235,7 @@ local callouts = {
    end,
 
    oneHundred = function(self)
-      local oneHundred = ALT() < 10 and IAS() >= 100
+      local oneHundred = radALT() < 10 and IAS() >= 100
       if oneHundred then
          sleep(PFD_delay)
          play("oneHundred")
@@ -230,7 +247,7 @@ local callouts = {
    V1 = function(self,V1Select)
       if not V1Select then return true
       else V1Select = V1Select - V1_timing end
-      local V1 = ALT() < 10 and IAS() >= V1Select
+      local V1 = radALT() < 10 and IAS() >= V1Select
       if V1 then
          sleep(PFD_delay)
          play("v1", 700)
@@ -241,7 +258,7 @@ local callouts = {
 
    rotate = function(self,VrSelect)
       if not VrSelect then return true end
-      local rotate = ALT() < 10 and IAS() >= VrSelect
+      local rotate = radALT() < 10 and IAS() >= VrSelect
       if rotate then
          sleep(PFD_delay)
          play("rotate")
@@ -252,9 +269,10 @@ local callouts = {
 
    positiveClimb = function(self)
       local verticalSpeed = ipc.readSW(0x02C8) * 60 * 3.28084 / 256
-      local positiveClimb = ALT() >= 10 and verticalSpeed >= 500
-      local skipThis = not positiveClimb and ALT() > 150.0
+      local positiveClimb = radALT() >= 10 and verticalSpeed >= 500
+      local skipThis = not positiveClimb and radALT() > 150.0
       if positiveClimb then
+         ipc.set("takeoffAtTime",currTime())
          play("positiveClimb")
          log("Positive climb")
       elseif skipThis then
@@ -281,7 +299,7 @@ local callouts = {
 
    reverseGreen = function(self)
       local reverseGreen = readLvar("FSLA320_reverser_left") >= reverserDoorThreshold and readLvar("FSLA320_reverser_right") >= reverserDoorThreshold
-      local noReverse = (not reverseGreen and self.noReverseTimeRef and timePassedSince(self.noReverseTimeRef) > plusminus(2500,0.2)) or groundSpeed() < 100
+      local noReverse = (not reverseGreen and self.noReverseTimeRef and timePassedSince(self.noReverseTimeRef) > plusminus(3500,0.2)) or groundSpeed() < 100
       if self.landedAtTime and reverseSelected() and not self.noReverseTimeRef then 
          self.noReverseTimeRef = currTime() 
       end
@@ -297,7 +315,7 @@ local callouts = {
          log("TL2 = " .. readLvar("VC_PED_TL_2"))
          log("Left reverser = " .. readLvar("FSLA320_reverser_left"))
          log("Right reverser = " .. readLvar("FSLA320_reverser_left"))
-         log("No reverse time reference: " .. self.noReverseTimeRef)
+         if self.noReverseTimeRef  then log("No reverse time reference: " .. self.noReverseTimeRef) end
          log("Time of landing: " .. self.landedAtTime)
          log("Current time: " .. currTime())
       end
@@ -305,10 +323,9 @@ local callouts = {
    end,
 
    decel = function(self)
-      local noDecel
       local accelLateral = ipc.readDBL(0x3070)
       local decel = accelLateral < -4
-      local noDecel = (not decel and timePassedSince(self.noDecelTimeRef) > plusminus(1500)) or groundSpeed() < 70
+      local noDecel = (not decel and timePassedSince(self.noDecelTimeRef) > plusminus(2500)) or groundSpeed() < 70
       if decel then
          log("Decel")
          sleep(plusminus(1200))
@@ -335,6 +352,11 @@ local callouts = {
 
       if PM_announces_brake_check == 0 then return end
       sound.path(sound_path)
+      if voice_control == 1 then
+         ipc.set("brakeCheck",0) 
+         repeat coroutine.yield() until ipc.get("brakeCheck") == 1 or thrustLeversSetForTakeoff() or not enginesRunning()
+         ipc.set("brakeCheck",nil) 
+      end
 
       repeat
 
@@ -352,7 +374,7 @@ local callouts = {
             sleep(500)
             if leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
                if leftPressure == 0 and rightPressure == 0 then
-                  sleep(plusminus(1000))
+                  sleep(plusminus(500))
                   play("pressureZero")
                   brakesChecked = true
                elseif leftPressure > 0 or rightPressure > 0 then

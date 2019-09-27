@@ -2,6 +2,8 @@ local json = require("json")
 local maf = require("maf")
 local socket = require("socket")
 local http = require("socket.http")
+local ipc = ipc
+local sleep = ipc.sleep
 
 local rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
 local rotorbrake = 66587
@@ -59,17 +61,20 @@ function plusminus(val, percent)
 end
 
 function think(dist)
-   local time = plusminus(300)
-   if dist > 50 then 
-      time = time + plusminus(200)
-      if prob(0.2) then time = time + plusminus(500) end
-      if prob(0.05) then time = time + plusminus(1000) end
+   local time = 0
+   if dist > 200 then 
+      time = time + plusminus(300) 
+      if prob(0.5) then time = time + plusminus(300) end
    end
-   log("Thinking for " .. time .. " ms. Hmmm...")
-   ipc.sleep(time)
+   if prob(0.2) then time = time + plusminus(300) end
+   if prob(0.05) then time = time + plusminus(1000) end
+   if time > 0 then
+      log("Thinking for " .. time .. " ms. Hmmm...")
+      sleep(time)
+   end
 end
 
-hand = {
+local hand = {
 
    speed = function(dist)
       log("Distance: " .. math.floor(dist) .. " mm")
@@ -80,16 +85,22 @@ hand = {
       return speed
    end,
 
-   moveto = function(self,newpos)
+   moveto = function(self,newpos,control)
+      if self.timeOfLastMove and ipc.elapsedtime() - self.timeOfLastMove > 5000 then
+         self.pos = self.home
+      end
       local dist = (newpos - self.pos):length()
-      if self.pos ~= self.home and newpos ~= self.home then think(dist) end
-      local time = dist / self.speed(dist)
-      ipc.sleep(time)
-      self.pos = newpos
-      return time
+      if self.pos ~= self.home and newpos ~= self.home and dist > 50 then think(dist) end
+      local time
+      if self.pos ~= newpos then
+         time = dist / self.speed(dist) 
+         sleep(time)
+         self.pos = newpos
+         self.timeOfLastMove = ipc.elapsedtime()
+      end
+      return time or 0
    end,
 
-   rest = function(self) self:moveto(self.home) end
 }
 
 if pilot == 1 then hand.home = maf.vector(-70,420,70)
@@ -102,120 +113,203 @@ hand.pos = hand.home
 
 local Control = {
 
-   new = function(self,control)
-      if control.var:find("Guard") then control.guard = true end
-      setmetatable(control,self)
-      if control.posn then
-         local temp = control.posn
-         control.posn = {}
-         for k,v in pairs(temp) do
-            control.posn[k:lower()] = v
-            control.posn[k:upper()] = v
-         end
-      end
-      return control
-   end,
-
-   __call = function(self,targetPos)
-      local button = not targetPos
-      local switch = not button
-      local knob = self.range
-      if (button and not self.posn) or (switch and self.posn) then
-         log("Position of control " .. self.var:gsub("VC_", "") .. ": x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z), 1)
-         if human then
-            local reachtime = hand:moveto(self.pos) 
-            log("Control reached in " .. math.floor(reachtime) .. " ms")
-         end
-      end
-      if button and not self.posn then
-         self:press()
-      elseif (switch and self.posn) or knob then
-         self:set(targetPos)
-      end
-   end,
-
-   press = function(self)
-      if self.inc and self.dec then
-         ipc.control(rotorbrake, self.inc)
-         ipc.sleep(50)
-         ipc.control(rotorbrake, self.dec)
-      elseif self.tgl then
-         ipc.control(rotorbrake, self.tgl)
-      end
-      local t = plusminus(self.time or 300) - 50
-      if human then
-         ipc.sleep(t)
-         log("Interaction with the control took " .. t .. " ms")
-      end
-   end,
-
-   set = function(self,targetPos)
-      if not targetPos then return end
-      local sleepTime = 5
-      if self.range and type(targetPos) == "number" then
-         targetPos = self.range / 100 * targetPos
-      elseif type(targetPos) == "string" then
-         if human then sleepTime = self.time or 100 end
-         targetPos = self.posn[targetPos:upper()]
-      end
-      local currPos = self:getVar()
-      if currPos ~= targetPos then
-         while true do
-            currPos = self:getVar()
-            if currPos < targetPos then
-               if self.control then ipc.control(self.control.inc)
-               elseif self.tgl then ipc.control(rotorbrake, self.tgl)
-               else ipc.control(rotorbrake, self.inc) end
-            elseif currPos > targetPos then
-               if self.control then ipc.control(self.control.dec)
-               elseif self.tgl then ipc.control(rotorbrake, self.tgl)
-               else ipc.control(rotorbrake, self.dec) end
-            else
-               if self.hidepointer then
-                  local x,y = mouse.getpos()
-                  mouse.move(x+1,y+1)
-                  mouse.move(x,y)
-                  ipc.sleep(10)
-                  ipc.control(1139)
-               end
-               break
-            end
-            local t = plusminus(sleepTime)
-            ipc.sleep(t) 
-            if human then log("Interaction with the control took " .. t .. " ms") end
-         end
-      end
-   end,
-
-   getPosn = function(self)
-      if self.posn then
-         local val = ipc.readLvar(self.var)
-         for k,v in pairs(self.posn) do
-            if v == val then return k:upper() end
-         end
-      end
+   new = function(self,o)
+      self.__index = self
+      o.__call = o.__call or self.__call or nil
+      return setmetatable(o,self)
    end,
 
    isLit = function(self)
+      if not self.Lt then return end
       if type(self.Lt) == "string" then return ipc.readLvar(self.Lt) == 1
       else return ipc.readLvar(self.Lt.Brt) == 1 or ipc.readLvar(self.Lt.Dim) == 1 end
    end,
 
    getVar = function(self) return ipc.readLvar(self.var) end,
 
-   isDown = function(self) if not self.posn then return ipc.readLvar(self.var) == 10 end end,
-
-   open = function(self) if self.guard then ipc.control(rotorbrake,self.inc) end end,
-
-   close = function(self) if self.guard then ipc.control(rotorbrake,self.dec) end end,
-
-   push = function(self) if self.pushctrl then ipc.control(rotorbrake,self.pushctrl) end end,
-
-   pull = function(self) if self.pullctrl then ipc.control(rotorbrake,self.pullctrl) end end
-
 }
 
-Control.__index = Control
+local Button = Control:new({
+
+   __call = function(self)
+      if human then
+         log("Position of control " .. self.var:gsub("VC_", "") .. ": x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z), 1)
+         local reachtime = hand:moveto(self.pos,self.sect) 
+         log("Control reached in " .. math.floor(reachtime) .. " ms")
+      end
+      local pauseMidway = 50
+      if self.inc and self.dec then
+         ipc.control(rotorbrake, self.inc)
+         sleep(pauseMidway)
+         ipc.control(rotorbrake, self.dec)
+      elseif self.tgl then
+         pauseMidway = 0
+         ipc.control(rotorbrake, self.tgl)
+      elseif self.macro then
+         ipc.macro(self.macro,3)
+         sleep(pauseMidway)
+         ipc.macro(self.macro,13)
+      end
+      if human then
+         local timeToInteract = plusminus(300)
+         sleep(timeToInteract)
+         log("Interaction with the control took " .. timeToInteract + pauseMidway .. " ms")
+      end
+   end,
+
+   isDown = function(self) return ipc.readLvar(self.var) == 10 end
+
+})
+
+local Guard = Control:new({
+
+   lift = function(self) ipc.control(rotorbrake,self.inc) end,
+
+   close = function(self) ipc.control(rotorbrake,self.dec) end,
+
+   isOpen = function(self) return ipc.readLvar(self.var) == 10 end
+
+})
+
+local FCU_Switch = Control:new({
+
+   push = function(self) ipc.control(rotorbrake,self.pushctrl) end,
+
+   pull = function(self) ipc.control(rotorbrake,self.pullctrl) end
+
+})
+
+local Switch = Control:new({
+
+   __call = function(self,targetPos)
+      targetPos = self:convertTargetPos(targetPos)
+      if not targetPos then return end
+      if human then
+         log("Position of control " .. self.var:gsub("VC_", "") .. ": x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z), 1)
+         local reachtime = hand:moveto(self.pos) 
+         log("Control reached in " .. math.floor(reachtime) .. " ms")
+      end
+      local currPos = self:getVar()
+      if currPos ~= targetPos then
+         if human then
+            local tInit = plusminus(300 or self.time)
+            sleep(tInit)
+            log("Interaction with the control took " .. tInit .. " ms")
+         end
+         self:set(targetPos)
+      end
+   end,
+
+   convertTargetPos = function(self,targetPos)
+      if type(targetPos) == "string" then
+         return self.posn[targetPos:upper()]
+      else return false end
+   end,
+
+   set = function(self,targetPos)
+      while true do
+         currPos = self:getVar()
+         if currPos < targetPos then
+            if self.control then ipc.control(self.control.inc)
+            elseif self.tgl then ipc.control(rotorbrake, self.tgl)
+            else ipc.control(rotorbrake, self.inc) end
+         elseif currPos > targetPos then
+            if self.control then ipc.control(self.control.dec)
+            elseif self.tgl then ipc.control(rotorbrake, self.tgl)
+            else ipc.control(rotorbrake, self.dec) end
+         else
+            if self.hidepointer then
+               local x,y = mouse.getpos()
+               mouse.move(x+1,y+1)
+               mouse.move(x,y)
+               sleep(10)
+               ipc.control(1139)
+            end
+            break
+         end
+         if human then
+            local timeToInteract = plusminus(self.time or 100)
+            sleep(timeToInteract)
+            log("Interaction with the control took " .. timeToInteract .. " ms") 
+         else repeat sleep(5) until self:getVar() ~= currPos
+         end
+      end
+   end,
+
+   getPosn = function(self)
+      local val = ipc.readLvar(self.var)
+      for k,v in pairs(self.posn) do
+         if v == val then return k:upper() end
+      end
+   end
+
+})
+
+local KnobWithPositions = Switch:new({
+
+   set = function(self,targetPos)
+      while true do
+         currPos = self:getVar()
+         if currPos < targetPos then
+            if self.control then ipc.control(self.control.inc)
+            else ipc.control(rotorbrake, self.inc) end
+         elseif currPos > targetPos then
+            if self.control then ipc.control(self.control.dec)
+            else ipc.control(rotorbrake, self.dec) end
+         else
+            local x,y = mouse.getpos()
+            mouse.move(x+1,y+1)
+            mouse.move(x,y)
+            sleep(10)
+            ipc.control(1139)
+            break
+         end
+         if human then
+            local timeToInteract = plusminus(100)
+            sleep(timeToInteract)
+            log("Interaction with the control took " .. timeToInteract .. " ms") 
+         else
+            sleep(5) 
+         end
+      end
+   end,
+   
+})
+
+local KnobWithoutPositions = Switch:new({
+
+   convertTargetPos = function(self,targetPos)
+      if type(targetPos) == "number" then
+         return self.range / 100 * targetPos
+      else return false end
+   end,
+
+   set = function(self,targetPos)
+      local timeStarted = ipc.elapsedtime()
+      while true do
+         currPos = self:getVar()
+         if math.abs(currPos - targetPos) > 5 then
+            if currPos < targetPos then
+               if self.control then ipc.control(self.control.inc)
+               else ipc.control(rotorbrake, self.inc) end
+            elseif currPos > targetPos then
+               if self.control then ipc.control(self.control.dec)
+               else ipc.control(rotorbrake, self.dec) end
+            end
+         else
+            local x,y = mouse.getpos()
+            mouse.move(x+1,y+1)
+            mouse.move(x,y)
+            sleep(10)
+            ipc.control(1139)
+            if human then log("Interaction with the control took " .. (ipc.elapsedtime() - timeStarted) .. " ms") end
+            break
+         end
+         if human then sleep(1) end
+      end
+   end,
+
+})
 
 local FSL = {
 
@@ -237,19 +331,23 @@ local FSL = {
       for k,v in pairs(TL_posns) do
          if (pos and math.abs(pos - v) < 4) or (not pos and math.abs(ipc.readLvar("VC_PED_TL_1")  - v) < 4 and math.abs(ipc.readLvar("VC_PED_TL_2")  - v) < 4) then
             return k
-         end
+         elseif pos then return pos end
       end
    end,
 
    setTakeoffFlaps = function(self)
-      local setting = self.atsuLog:takeoffFlaps() or self:getTakeoffFlapsFromMcdu()
+      local setting = self.atsuLog:getTakeoffFlaps()
+      if not setting then
+         sleep(plusminus(1000))
+         setting = self:getTakeoffFlapsFromMcdu()
+      end
       if setting then self.PED_FLAP_LEVER(tostring(setting)) end
       return setting
    end,
 
    startTheApu = function(self)
       if not self.OVHD_APU_Master_Button:isDown() then self.OVHD_APU_Master_Button() end
-      ipc.sleep(plusminus(2000,0.3))
+      sleep(plusminus(2000,0.3))
       self.OVHD_APU_Start_Button()
    end,
 
@@ -257,8 +355,9 @@ local FSL = {
       side = side or pilot
       if side == 1 then _side = "CPT" elseif side == 2 then _side = "FO" end
       self[_side].PED_MCDU_KEY_PERF()
-      ipc.sleep(500)
-      local setting = self.MCDU.getDisplay(side,162,162)
+      sleep(500)
+      local setting = self.MCDU:getString(side,162,162)
+      sleep(plusminus(1000))
       self[_side].PED_MCDU_KEY_FPLN()
       return tonumber(setting)
    end,
@@ -271,22 +370,44 @@ local FSL = {
 
    MCDU = {
 
-      getDisplay = function(side,startpos,endpos)
+      getArray = function(self,side)
+         if not tonumber(side) then return end
          local port = remote_port or "8080"
          local displaystr = http.request("http://localhost:" .. port .. "/MCDU/Display/3CA" .. side)
          displaystr = displaystr:sub(displaystr:find("%[%[") + 1, displaystr:find("%]%]"))
          local display = {}
-         for unit in displaystr:gmatch("%[(.-)%]") do
-            if unit:find(",") then
-               unit = unit:sub(1, unit:find(",") - 1)
-            end
-            if unit == "" then unit = " "
-            else unit = string.char(tonumber(unit)) end
-            display[#display + 1] = unit
+         for _unit in displaystr:gmatch("%[(.-)%]") do
+            local unit = {}
+            if _unit:find(",") then
+               local ind = _unit:find(",")
+               unit[1] = _unit:sub(1, ind-1)
+               if unit[1] == "" then unit[1] = nil
+               else unit[1] = string.char(tonumber(unit[1])) end
+               unit[2] = tonumber(_unit:sub(ind+1,ind+1))
+               unit[3] = tonumber(_unit:sub(ind+3,ind+3))
+            else unit = "" end
+            display[#display+1] = unit
          end
-         if startpos then display = table.concat(display,nil,startpos,endpos or #display) end
-         return display -- either - if no startpos is specified - the whole display as an array, or a string from startpos to either endpos or the end of the display if no endpos is specified
-      end
+         return display
+      end,
+
+      getString = function(self,side,startpos,endpos)
+         local display = self:getArray(side)
+         local displaystr = ""
+         for i = startpos,endpos or #display do
+            displaystr = displaystr .. (display[i][1] or " ")
+         end
+         return displaystr
+      end,
+
+      getScratchpad = function(self,side) return self:getString(side,313) end,
+
+      isBold = function(self,side,pos)
+         local display = self:getArray(side)
+         local unit = display[pos]
+         if unit ~= "" and not unit[1]:match("%W") then return unit[3] == 0
+         else return nil end
+      end,
 
    }
 
@@ -299,7 +420,7 @@ FSL.trimwheel = {
    var = "VC_PED_trim_wheel_ind",
 
    getInd = function(self)
-      ipc.sleep(5)
+      sleep(5)
       local CG_ind = ipc.readLvar(self.var)
       if ac_type == "A320" then
          if CG_ind <= 1800 and CG_ind > 460 then
@@ -319,10 +440,10 @@ FSL.trimwheel = {
    
    set = function(self,CG,step)
       local CG_man
-      if CG then CG_man = true else CG = FSL.atsuLog:MACTOW() end
+      if CG then CG_man = true else CG = FSL.atsuLog:getMACTOW() or ipc.readDBL(0x2EF8) * 100 end
       if not CG then return end
       if not step then
-         if not CG_man and prob(0.1) then log("Looking for the loadsheet") ipc.sleep(plusminus(10000,0.5)) end
+         if not CG_man and prob(0.1) then log("Looking for the loadsheet") sleep(plusminus(10000,0.5)) end
          log("Setting the trim. CG: " .. CG, 1)
          if human then
             log("Position of the trimwheel: x = " .. math.floor(self.pos.x) .. ", y = " .. math.floor(self.pos.y) .. ", z = " .. math.floor(self.pos.z))
@@ -340,13 +461,13 @@ FSL.trimwheel = {
          if time > 1000 then time = 1000 end
          if step and time > 70 then time = 70 end
          if CG > CG_ind then
-            if dist > 3.1 then self:set(CG_ind + 3,1) ipc.sleep(plusminus(350,0.2)) end
+            if dist > 3.1 then self:set(CG_ind + 3,1) sleep(plusminus(350,0.2)) end
             ipc.control(self.control.inc)
-            ipc.sleep(time - 5)
+            sleep(time - 5)
          elseif CG < CG_ind then
-            if dist > 3.1 then self:set(CG_ind - 3,1) ipc.sleep(plusminus(350,0.2)) end
+            if dist > 3.1 then self:set(CG_ind - 3,1) sleep(plusminus(350,0.2)) end
             ipc.control(self.control.dec)
-            ipc.sleep(time - 5)
+            sleep(time - 5)
          end
          local trimIsSet = math.abs(CG - CG_ind) <= 0.2
          if step then trimIsSet = math.abs(CG - CG_ind) <= 0.5 end
@@ -380,7 +501,7 @@ FSL.atsuLog = {
       return log
    end,
 
-   MACTOW = function(self)
+   getMACTOW = function(self)
       local _log = log
       local log = self:get()
       if not log then return end
@@ -398,7 +519,7 @@ FSL.atsuLog = {
       end
    end,
 
-   takeoffPacks = function(self)
+   getTakeoffPacks = function(self)
       local _log = log
       local log = self:get()
       if not log then return end
@@ -416,7 +537,7 @@ FSL.atsuLog = {
       end
    end,
 
-   takeoffFlaps = function(self)
+   getTakeoffFlaps = function(self)
       local log = self:get()
       if not log then return end
       for i = #log,1,-1 do
@@ -466,7 +587,7 @@ local rawControls = rootdir .. "FSL2Lua\\lib\\FSL.json"
 io.input(rawControls)
 rawControls = json.parse(io.read())
 
-function initPos(varname,control)
+local function initPos(varname,control)
    local pos = control.pos
    local mirror = {
       MCDU_R = "MCDU_L",
@@ -498,60 +619,86 @@ function initPos(varname,control)
 end
 
 for varname,control in pairs(rawControls) do
+
    control.pos = initPos(varname,control)
-   if varname:find("Knob") or varname:find("KNOB") then control.hidepointer = true end
-   local replace = {
-      CPT = {
-         MCDU_L = "MCDU",
-         COMM_1 = "COMM",
-         RADIO_1 = "RADIO",
-         _CP = ""
-      },
-      FO = {
-         MCDU_R = "MCDU",
-         COMM_2 = "COMM",
-         RADIO_2 = "RADIO",
-         _FO = ""
+
+   if control.posn then
+      local temp = control.posn
+      control.posn = {}
+      for k,v in pairs(temp) do
+         control.posn[k:lower()] = v
+         control.posn[k:upper()] = v
+      end
+   end
+
+   if control.pushctrl and control.pullctrl then control = FCU_Switch:new(control)
+   elseif control.var:find("Knob") or control.var:find("KNOB") then
+      if control.posn then
+         control = KnobWithPositions:new(control)
+      elseif control.range then
+         control = KnobWithoutPositions:new(control)
+      end
+   elseif control.posn then control = Switch:new(control)
+   elseif ((control.inc and control.dec) or control.tgl or control.macro) then
+      if control.var:find("Guard") then control = Guard:new(control)
+      else control = Button:new(control) end
+   else control = nil end
+   
+   if control then
+
+      local replace = {
+         CPT = {
+            MCDU_L = "MCDU",
+            COMM_1 = "COMM",
+            RADIO_1 = "RADIO",
+            _CP = ""
+         },
+         FO = {
+            MCDU_R = "MCDU",
+            COMM_2 = "COMM",
+            RADIO_2 = "RADIO",
+            _FO = ""
+         }
       }
-   }
-   local controlTbl, side
-   for pattern, replace in pairs(replace.CPT) do
-      if varname:find(pattern) then
-         if pattern == "_CP" and varname:find("_CPT") then pattern = "_CPT" end
-         controlName = varname:gsub(pattern,replace)
-         FSL.CPT[controlName] = Control:new(control)
-         controlTbl = FSL.CPT[controlName]
-         controlTbl.name = controlName
-         controlTbl.side = "CPT"
-         if pilot == 1 then FSL[controlName] = FSL.CPT[controlName]
-         elseif pilot == 2 then FSL.PF[controlName] = FSL.CPT[controlName] end
-      end
-   end
-   for pattern, replace in pairs(replace.FO) do
-      if varname:find(pattern) then
-         controlName = varname:gsub(pattern,replace)
-         FSL.FO[controlName] = Control:new(control)
-         controlTbl = FSL.FO[controlName]
-         controlTbl.name = controlName
-         controlTbl.side = "FO"
-         if pilot == 2 then FSL[controlName] = FSL.FO[controlName]
-         elseif pilot == 1 then FSL.PF[controlName] = FSL.FO[controlName] end
-      end
-   end
-   if not controlTbl then
-      FSL[varname] = Control:new(control)
-      controlTbl = FSL[varname]
-      controlTbl.name = varname
-   end
-   if controlTbl.posn then
-      for pos in pairs(controlTbl.posn) do
-         if controlTbl.side then
-            FSL[controlTbl.side][controlTbl.name .. "_" .. pos:upper()] = function() controlTbl:set(pos) end
-         else
-            FSL[controlTbl.name .. "_" .. pos:upper()] = function() controlTbl:set(pos) end
+      for pattern, replace in pairs(replace.CPT) do
+         if varname:find(pattern) then
+            if pattern == "_CP" and varname:find("_CPT") then pattern = "_CPT" end
+            controlName = varname:gsub(pattern,replace)
+            FSL.CPT[controlName] = control
+            control.name = controlName
+            control.side = "CPT"
+            if pilot == 1 then FSL[controlName] = control
+            elseif pilot == 2 then FSL.PF[controlName] = control end
          end
       end
+      for pattern, replace in pairs(replace.FO) do
+         if varname:find(pattern) then
+            controlName = varname:gsub(pattern,replace)
+            FSL.FO[controlName] = control
+            control.name = controlName
+            control.side = "FO"
+            if pilot == 2 then FSL[controlName] = FSL.FO[controlName]
+            elseif pilot == 1 then FSL.PF[controlName] = FSL.FO[controlName] end
+         end
+      end
+      
+      if not control.side then 
+         FSL[varname] = control 
+         control.name = varname
+      end
+
+      if control.posn then
+         for pos in pairs(control.posn) do
+            if control.side then
+               FSL[control.side][control.name .. "_" .. pos:upper()] = function() control(pos) end
+            else
+               FSL[control.name .. "_" .. pos:upper()] = function() control(pos) end
+            end
+         end
+      end
+
    end
+
 end
 
 return FSL
