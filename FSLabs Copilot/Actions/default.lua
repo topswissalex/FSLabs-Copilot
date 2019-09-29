@@ -275,7 +275,7 @@ function actions()
    end
 
    if ten_thousand_arr == 1 then
-      repeat sleep() until (descending() and ALT() > 10200 and ALT() < 10300) or onGround()
+      repeat sleep() until (descending() and ALT() > 9500 and ALT() < 9700) or onGround()
       if not onGround() then tenThousandArrSequence() end
    end
 
@@ -301,7 +301,7 @@ function actions()
 
    repeat sleep() until not enginesRunning()
 
-   sleep(plusminus(60000))
+   sleep(plusminus(30000))
 
    FSL.MIP_CHRONO_ELAPS_SEL_Switch("RST")
 

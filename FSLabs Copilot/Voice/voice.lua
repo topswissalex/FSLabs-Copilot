@@ -48,7 +48,11 @@ end
 
 function voiceEvents(_,event)
    if event > 2000 or ipc.get("FSLC_mute") == 1 then return end
-   for k,v in pairs(events) do if event == v then print(k) end end
+   for phrase,code in pairs(events) do 
+      if event == code then 
+         log("Recognized " .. phrase)
+      end 
+   end
    if event == events.GEAR_UP and ipc.get("takeoffAtTime") and currTime() - ipc.get("takeoffAtTime") < 60000 then
       react()
       FSL.MIP_GEAR_Lever("UP")
