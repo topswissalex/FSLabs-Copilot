@@ -6,7 +6,7 @@ voice_control = 1
 
 -- Callouts:
 
-volume = 60
+volume = 65
 remote_port = 8080 -- The port of the remote MCDU. Only change it here if you changed it in the FSLabs options
 play_V1 = 1 -- play V1 sound? 0 = no, 1 = yes
 V1_timing = 0 -- V1 will be announced at the speed of V1 - V1_timing. If you want V1 to be announced slightly before V1 is reached on the PFD, type the number of knots.
@@ -14,7 +14,7 @@ PM = 2 -- Pilot Monitoring: 1 = Captain, 2 = First Officer
 show_startup_message = 0 -- Show startup message? 0 = no, 1 = yes
 sound_device = 0 -- zero is default (only change this if no sounds are played)
 PM_announces_flightcontrol_check = 1 -- PM announces 'full left', 'full right' etc.
-PM_announces_brake_check = 1 -- PM announces 'brake pressure zero' after the brake check. The trigger is the first application of the brakes after you start moving
+PM_announces_brake_check = 1 -- PM announces 'brake pressure zero' after the brake check.
 
 -- Actions:
 
@@ -108,27 +108,6 @@ function enginesRunning(both)
    else return eng1_running or eng2_running end
 end
 
-function takeoffThrustIsSet()
-   local eng1_N1 = ipc.readDBL(0x2010)
-   local eng2_N1 = ipc.readDBL(0x2110)
-   local N1_window = 0.1
-   local timeWindow = 1000
-   if eng1_N1 > 80 and eng2_N1 > 80 then
-      local eng1_N1_prev = eng1_N1
-      local eng2_N1_prev = eng2_N1
-      while true do
-         sleep(plusminus(timeWindow,0.2))
-         eng1_N1 = ipc.readDBL(0x2010)
-         eng2_N1 = ipc.readDBL(0x2110)
-         local stable = eng1_N1 > 80 and eng2_N1 > 80 and math.abs(eng1_N1 - eng1_N1_prev) < N1_window and math.abs(eng1_N1 - eng1_N1_prev) < N1_window
-         eng1_N1_prev = eng1_N1
-         eng2_N1_prev = eng2_N1
-         if stable then return true
-         elseif not thrustLeversSetForTakeoff() then return false end
-      end
-   end
-end
-
 local previousCalloutEndTime
 
 function play(fileName,length)
@@ -147,7 +126,10 @@ sound.path(sound_path)
 
 if package.loaded["FSLabs Copilot"] then return end
 
-if enable_actions == 1 then ipc.runlua("FSLabs Copilot\\Actions\\" .. SOP) end
+ipc.runlua("FSLabs Copilot\\callouts")
+sleep(5000)
+if enable_actions == 1 then
+   ipc.runlua("FSLabs Copilot\\Actions\\" .. SOP) end
 if voice_control == 1 then
    function mute(flag)
       if ipc.testflag(flag) then ipc.set("FSLC_mute",1)
@@ -159,7 +141,7 @@ if voice_control == 1 then
       ext.shell("FSLabs Copilot\\voice\\FSLCopilot_voice.exe",EXT_KILL)
    end
 end
-ipc.runlua("FSLabs Copilot\\callouts")
+
 
 do
    local play_V1 = play_V1
@@ -176,6 +158,7 @@ do
    log("----------------------------------------------------------------------------------------",1)
    log("----------------------------------------------------------------------------------------",1)
    local msg = "\n'Pilot Monitoring Callouts' plug-in started.\n\n\nSelected options:\n\nPlay V1 callout: " .. play_V1 .. "\n\nCallouts volume: " .. volume .. "%" .. "\n\nPilot Monitoring : " .. PM .."\n\nActions: " .. enable_actions
-   if show_startup_message == 1 then ipc.display(msg) sleep(20000) end
+   if show_startup_message == 1 then ipc.display(msg,20) end
+   if voice_control == 0 then sleep(20000) end
 end
 

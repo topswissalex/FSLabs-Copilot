@@ -38,6 +38,7 @@ local callouts = {
       ipc.set("descending",nil)
       self.latestTouchdownAtTime = nil
       self.landedAtTime = nil
+      if not enginesRunning() then ipc.set("landedAtTime",nil) end
       self.noReverseTimeRef = nil
       self.noDecelTimeRef = nil
       self.reverseFuncEndedAtTime = nil
@@ -181,6 +182,7 @@ local callouts = {
       elseif currTime() - self.latestTouchdownAtTime > 500 then
          log("Landed")
          self.landedAtTime = currTime()
+         ipc.set("landedAtTime",currTime())
       end
    end,
 
@@ -195,6 +197,7 @@ local callouts = {
          until self:spoilers()
       else
          self.landedAtTime = self.takeoffAbortedAtTime 
+         ipc.set("landedAtTime",self.takeoffAbortedAtTime )
       end
 
       -- reverse green
@@ -222,16 +225,30 @@ local callouts = {
    end,
 
    thrustSet = function(self)
-      local thrustSet = radALT() < 10 and takeoffThrustIsSet()
-      local skipThis = not thrustSet and IAS() > 80
-      if thrustSet then
-         self.takeoffThrustWasSet = true
-         play("thrustSet")
-         log("Thrust set")
-      elseif skipThis then
-         log("Thrust set skipped (IAS > 80 kts)")
+      local eng1_N1 = ipc.readDBL(0x2010)
+      local eng2_N1 = ipc.readDBL(0x2110)
+      local N1_window = 0.1
+      local timeWindow = 1000
+      if eng1_N1 > 80 and eng2_N1 > 80 then
+         local eng1_N1_prev = eng1_N1
+         local eng2_N1_prev = eng2_N1
+         while true do
+            sleep(plusminus(timeWindow,0.2))
+            eng1_N1 = ipc.readDBL(0x2010)
+            eng2_N1 = ipc.readDBL(0x2110)
+            local thrustSet = eng1_N1 > 80 and eng2_N1 > 80 and math.abs(eng1_N1 - eng1_N1_prev) < N1_window and math.abs(eng1_N1 - eng1_N1_prev) < N1_window
+            local skipThis = not thrustSet and IAS() > 80
+            eng1_N1_prev = eng1_N1
+            eng2_N1_prev = eng2_N1
+            if thrustSet then
+               self.takeoffThrustWasSet = true
+               play("thrustSet")
+               log("Thrust set")
+            end
+            if not thrustLeversSetForTakeoff() then break end
+            return thrustSet or skipThis
+         end
       end
-      return thrustSet or skipThis
    end,
 
    oneHundred = function(self)
@@ -325,7 +342,7 @@ local callouts = {
    decel = function(self)
       local accelLateral = ipc.readDBL(0x3070)
       local decel = accelLateral < -4
-      local noDecel = (not decel and timePassedSince(self.noDecelTimeRef) > plusminus(2500)) or groundSpeed() < 70
+      local noDecel = (not decel and timePassedSince(self.noDecelTimeRef) > plusminus(3500)) or groundSpeed() < 70
       if decel then
          log("Decel")
          sleep(plusminus(1200))
@@ -353,9 +370,9 @@ local callouts = {
       if PM_announces_brake_check == 0 then return end
       sound.path(sound_path)
       if voice_control == 1 then
-         ipc.set("brakeCheck",0) 
-         repeat coroutine.yield() until ipc.get("brakeCheck") == 1 or thrustLeversSetForTakeoff() or not enginesRunning()
-         ipc.set("brakeCheck",nil) 
+         ipc.set("brakeCheckVoiceTrigger",0) 
+         repeat coroutine.yield() until ipc.get("brakeCheckVoiceTrigger") == 1 or thrustLeversSetForTakeoff() or not enginesRunning()
+         ipc.set("brakeCheckVoiceTrigger",nil) 
       end
 
       repeat
