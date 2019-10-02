@@ -178,11 +178,19 @@ function afterLandingSequence(startApu)
    FSL.PED_WXRadar_SYS_Switch("OFF")
    FSL.PED_WXRadar_PWS_Switch("OFF")
 
-   if not FSL.PF.GSLD_EFIS_FD_Button:isLit() then FSL.PF.GSLD_EFIS_FD_Button() end
+   if not FSL.PF.GSLD_EFIS_FD_Button:isLit() and FDs_off_after_landing == 0 then
+      FSL.PF.GSLD_EFIS_FD_Button()
+   elseif FSL.PF.GSLD_EFIS_FD_Button:isLit() and FDs_off_after_landing == 1 then
+      FSL.PF.GSLD_EFIS_FD_Button()
+   end
    if FSL.PF.GSLD_EFIS_LS_Button:isLit() then FSL.PF.GSLD_EFIS_LS_Button() end
    if FSL.bird() then FSL.GSLD_FCU_HDGTRKVSFPA_Button() end
    if FSL.GSLD_EFIS_LS_Button:isLit() then FSL.GSLD_EFIS_LS_Button() end
-   if not FSL.GSLD_EFIS_FD_Button:isLit() then FSL.GSLD_EFIS_FD_Button() end
+   if not FSL.GSLD_EFIS_FD_Button:isLit() and FDs_off_after_landing == 0 then
+      FSL.GSLD_EFIS_FD_Button()
+   elseif FSL.GSLD_EFIS_FD_Button:isLit() and FDs_off_after_landing == 1 then
+      FSL.GSLD_EFIS_FD_Button()
+   end
 
    if pack2_off_after_landing == 1 and FSL.OVHD_AC_Pack_2_Button:isDown() then FSL.OVHD_AC_Pack_2_Button() end
 
@@ -242,7 +250,7 @@ function actions()
          sleep()
       end
 
-      if takeoff_sequence == 1 then
+      if takeoff_sequence == 1 and after_landing == 1 then
          if usingVoice then 
             ipc.set("takeoffSequence",0) 
             repeat sleep() until takeoffSequenceTrigger() or ipc.get("takeoffSequence") == 1

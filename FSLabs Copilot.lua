@@ -2,6 +2,8 @@
 -- ############ EDIT USER OPTIONS HERE ##############################
 -- ##################################################################
 
+-- Please read Flow.PDF in the 'FSLabs Copilot' folder before editing
+
 voice_control = 1
 
 -- Callouts:
@@ -13,8 +15,8 @@ V1_timing = 0 -- V1 will be announced at the speed of V1 - V1_timing. If you wan
 PM = 2 -- Pilot Monitoring: 1 = Captain, 2 = First Officer
 show_startup_message = 0 -- Show startup message? 0 = no, 1 = yes
 sound_device = 0 -- zero is default (only change this if no sounds are played)
-PM_announces_flightcontrol_check = 1 -- PM announces 'full left', 'full right' etc.
-PM_announces_brake_check = 1 -- PM announces 'brake pressure zero' after the brake check.
+PM_announces_flightcontrol_check = 1
+PM_announces_brake_check = 1
 
 -- Actions:
 
@@ -31,20 +33,19 @@ ten_thousand_dep = 1
 ten_thousand_arr = 1
 after_landing = 1
 
-after_landing_trigger = 1 -- only concerns voice control. 1 = the procedure will be triggered by a voice command, 2 = the procedure will be triggered by you disarming the spoilers
-packs_on_takeoff = 0 -- 1 = takeoff with the packs on. This option will be ignored if a performance request is found in the ATSU log
+after_landing_trigger = 1
+FDs_off_after_landing = 1
+packs_on_takeoff = 0
 pack2_off_after_landing = 0
 
 -- ##################################################################
 -- ############### END OF USER OPTIONS ##############################
 -- ##################################################################
 
-rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
-
 FSL2Lua_pilot = PM
 FSL2Lua_log = 1
 FSL = require "FSL2Lua"
-SOP = "default"
+local SOP = "default"
 
 readLvar = ipc.readLvar
 currTime = ipc.elapsedtime
@@ -54,6 +55,7 @@ sound_path = "..\\Modules\\FSLabs Copilot\\Sounds"
 -----------------------------------------------------------------------------------------
 
 local logging = true
+local rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
 local logFile = rootdir .. "FSLabs Copilot\\FSLabs Copilot.log"
 if not package.loaded["FSLabs Copilot"] then io.open(logFile,"w"):close() end
 

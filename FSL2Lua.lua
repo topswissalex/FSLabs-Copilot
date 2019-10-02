@@ -1,5 +1,3 @@
-rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
+local rootdir = lfs.currentdir():gsub("\\\\","\\") .. "\\Modules\\"
 package.path = rootdir .. "FSL2Lua\\lib\\?.lua;" .. package.path
-
-local FSL = require "FSL"
-return FSL
+return require "FSL"

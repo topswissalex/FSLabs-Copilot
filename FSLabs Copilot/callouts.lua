@@ -369,34 +369,41 @@ local callouts = {
 
       if PM_announces_brake_check == 0 then return end
       sound.path(sound_path)
-      if voice_control == 1 then
-         ipc.set("brakeCheckVoiceTrigger",0) 
-         repeat coroutine.yield() until ipc.get("brakeCheckVoiceTrigger") == 1 or thrustLeversSetForTakeoff() or not enginesRunning()
-         ipc.set("brakeCheckVoiceTrigger",nil) 
-      end
 
       repeat
 
          if thrustLeversSetForTakeoff() or not enginesRunning() then return end
 
-         local leftBrakeApp = ipc.readUW(0x0BC4) * 100 / 16383
-         local rightBrakeApp = ipc.readUW(0x0BC6) * 100 / 16383
-         local leftPressure = readLvar("VC_MIP_BrkPress_L")
-         local rightPressure = readLvar("VC_MIP_BrkPress_R")
-         local pushback = readLvar("FSLA320_NWS_Pin") == 1
-         local brakeAppThreshold = 1
          local brakesChecked
 
-         if not pushback and groundSpeed() > 0.5 and leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
-            sleep(500)
-            if leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold then
-               if leftPressure == 0 and rightPressure == 0 then
-                  sleep(plusminus(500))
-                  play("pressureZero")
-                  brakesChecked = true
-               elseif leftPressure > 0 or rightPressure > 0 then
-                  return
-               end
+         local function brakeCheckConditions()
+            local leftBrakeApp = ipc.readUW(0x0BC4) * 100 / 16383
+            local rightBrakeApp = ipc.readUW(0x0BC6) * 100 / 16383
+            local pushback = readLvar("FSLA320_NWS_Pin") == 1
+            local brakeAppThreshold = 0.5
+            return groundSpeed() >= 0.2 and groundSpeed() < 3 and not pushback and leftBrakeApp > brakeAppThreshold and rightBrakeApp > brakeAppThreshold
+         end
+
+         if voice_control == 1 then
+            ipc.set("brakeCheckVoiceTrigger",0) 
+            repeat coroutine.yield() until ipc.get("brakeCheckVoiceTrigger") == 1 or thrustLeversSetForTakeoff() or not enginesRunning()
+            ipc.set("brakeCheckVoiceTrigger",nil) 
+            local voiceCommandAtTime = currTime()
+            while not brakeCheckConditions() do
+               sleep()
+               if currTime() - voiceCommandAtTime > 5000 then break end 
+            end
+         end
+
+         if brakeCheckConditions() then
+            local leftPressure = readLvar("VC_MIP_BrkPress_L")
+            local rightPressure = readLvar("VC_MIP_BrkPress_R")
+            if leftPressure == 0 and rightPressure == 0 then
+               sleep(plusminus(800,0.2))
+               play("pressureZero")
+               brakesChecked = true
+            elseif leftPressure > 0 or rightPressure > 0 then
+               return
             end
          end
 

@@ -570,14 +570,22 @@ end
 -----------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
-keyBindCount = 0
+local bindCount = 0
 
 function keyBind(keycode,func,cond,shifts,downup)
    cond = cond or function() return true end
-   keyBindCount = keyBindCount + 1
-   local funcName = "keyBind" .. keyBindCount
+   bindCount = bindCount + 1
+   local funcName = "FSL2LuaBind" .. bindCount
    _G[funcName] = function() if cond() then func() end end
    event.key(keycode,shifts,1 or downup,funcName)
+end
+
+function buttBind(joyLetter,butt,func,cond,downup)
+   cond = cond or function() return true end
+   bindCount = bindCount + 1
+   local funcName = "FSL2LuaBind" .. bindCount
+   _G[funcName] = function() if cond() then func() end end
+   event.button(joyLetter,butt,1 or downup,funcName)
 end
 
 -- Main ---------------------------------------------------------------------------------
@@ -645,6 +653,8 @@ for varname,control in pairs(rawControls) do
    else control = nil end
    
    if control then
+
+      control.type = "control"
 
       local replace = {
          CPT = {

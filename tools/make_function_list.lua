@@ -24,14 +24,12 @@ function makeList(table,tableName)
    local temp = {}
    for controlName,controlObj in pairs(table) do
       local line
-      if type(controlObj) == "table" and controlName then
-         if (controlObj.inc and controlObj.dec) or controlObj.tgl then
+      if type(controlObj) == "table" and controlObj.type == "control" then
             line = tableName .. "." .. controlName
+         if controlObj.posn then
             repeat
                line = line .. " "
             until #line == 42
-         end
-         if controlObj.posn then
             line = line .. "Positions: "
             for pos in pairsByKeys(controlObj.posn) do
                if pos == pos:upper() then line = line .. "\"" .. pos:upper() .. "\", " end
@@ -42,7 +40,6 @@ function makeList(table,tableName)
       if line then temp[line] = "" end
    end
    for line in pairsByKeys(temp) do
-      io.write("---------------------------------------------------------------------------------------------------------\n\n")
       io.write(line .. "\n\n")
    end
 end
