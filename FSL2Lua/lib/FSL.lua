@@ -138,17 +138,13 @@ local Button = Control:new({
          log("Control reached in " .. math.floor(reachtime) .. " ms")
       end
       local pauseMidway = 50
-      if self.inc and self.dec then
-         ipc.control(rotorbrake, self.inc)
-         sleep(pauseMidway)
-         ipc.control(rotorbrake, self.dec)
-      elseif self.tgl then
+      if self.tgl then
          pauseMidway = 0
          ipc.control(rotorbrake, self.tgl)
-      elseif self.macro then
-         ipc.macro(self.macro,3)
+      else
+         self:press()
          sleep(pauseMidway)
-         ipc.macro(self.macro,13)
+         self:release()
       end
       if human then
          local timeToInteract = plusminus(300)
@@ -157,7 +153,23 @@ local Button = Control:new({
       end
    end,
 
-   isDown = function(self) return ipc.readLvar(self.var) == 10 end
+   isDown = function(self) return ipc.readLvar(self.var) == 10 end,
+
+   press = function(self)
+      if self.inc then 
+         ipc.control(rotorbrake, self.inc) 
+      elseif self.macro then
+         ipc.macro(self.macro,3)
+      end
+   end,
+
+   release = function(self)
+      if self.dec then 
+         ipc.control(rotorbrake, self.dec) 
+      elseif self.macro then
+         ipc.macro(self.macro,13)
+      end
+   end
 
 })
 

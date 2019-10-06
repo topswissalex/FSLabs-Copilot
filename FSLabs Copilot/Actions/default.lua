@@ -34,7 +34,7 @@ function taxiSequence()
 end
 
 function takeoffSequenceTrigger()
-   return (thrustLeversSetForTakeoff() and FSL.OVHD_EXTLT_Land_L_Switch:getPosn() == "ON" and FSL.OVHD_EXTLT_Land__Switch:getPosn() == "ON")
+   return (thrustLeversSetForTakeoff() and FSL.OVHD_EXTLT_Land_L_Switch:getPosn() == "ON" and FSL.OVHD_EXTLT_Land_R_Switch:getPosn() == "ON")
 end
 
 function waitForLineup()
@@ -90,10 +90,10 @@ function tenThousandDepSequence()
 
    FSL.PED_MCDU_KEY_RADNAV()
    sleep(500)
-   local VOR1 = FSL.MCDU:isBold(PM,49)
-   local VOR2 = FSL.MCDU:isBold(PM,71)
-   local ADF1 = FSL.MCDU:isBold(PM,241)
-   local ADF2 = FSL.MCDU:isBold(PM,263)
+   local VOR1 = FSL.MCDU:isBold(PM,49) or FSL.MCDU:isBold(PM,54)
+   local VOR2 = FSL.MCDU:isBold(PM,71) or FSL.MCDU:isBold(PM,62)
+   local ADF1 = FSL.MCDU:isBold(PM,241) or FSL.MCDU:isBold(PM,246)
+   local ADF2 = FSL.MCDU:isBold(PM,263) or FSL.MCDU:isBold(PM,254)
    if VOR1 or VOR2 or ADF1 or ADF2 then 
       while not (FSL.MCDU:getScratchpad(PM):sub(6,8) == "CLR") do
          FSL.PED_MCDU_KEY_CLR()
@@ -226,7 +226,6 @@ function actions()
 
       local co_lineup = coroutine.create(waitForLineup)
       local checksCompleted, taxiSeqCompleted
-
       while true do
          if during_taxi == 1 then
             checksCompleted = ipc.get("flightControlsChecked") and ipc.get("brakesChecked")
@@ -245,18 +244,24 @@ function actions()
                   ipc.set("lineupSequence",nil)
                   break
                end
-            else repeat sleep() until not coroutine.resume(co_lineup) end
+            elseif not coroutine.resume(co_lineup) then
+               lineUpSequence()
+               break
+            end
          end
+         local eng1_N1 = ipc.readDBL(0x2010)
+         local eng2_N1 = ipc.readDBL(0x2110)
+         if eng1_N1 > 80 and eng2_N1 > 80 then break end
          sleep()
       end
 
       if takeoff_sequence == 1 and after_landing == 1 then
          if usingVoice then 
             ipc.set("takeoffSequence",0) 
-            repeat sleep() until takeoffSequenceTrigger() or ipc.get("takeoffSequence") == 1
-         else repeat sleep() until takeoffSequenceTrigger() end
+            repeat sleep() until takeoffSequenceTrigger() or ipc.get("takeoffSequence") == 1 or not onGround()
+         else repeat sleep() until takeoffSequenceTrigger() or not onGround() end
          sleep(plusminus(1000))
-         takeoffSequence()
+         if onGround() then takeoffSequence() end
          ipc.set("takeoffSequence",nil)
          local aborted
          repeat

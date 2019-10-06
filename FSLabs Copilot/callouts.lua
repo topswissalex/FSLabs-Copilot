@@ -618,5 +618,5 @@ setmetatable(callouts.flightControlsCheck,callouts.flightControlsCheck)
 -----------------------------------------------------------------------------------------
 
 callouts.firstRun = true
-sleep(10000)
+
 while true do callouts:main() end

@@ -27,7 +27,7 @@ enable_actions = 1 -- allow the PM to perform the procedures that are listed bel
 after_start = 1
 during_taxi = 1 
 lineup = 1
-takeoff_sequence = 1 
+takeoff_sequence = 1
 after_takeoff = 1
 ten_thousand_dep = 1
 ten_thousand_arr = 1
@@ -128,6 +128,7 @@ sound.path(sound_path)
 
 if package.loaded["FSLabs Copilot"] then return end
 
+sleep(10000)
 ipc.runlua("FSLabs Copilot\\callouts")
 sleep(5000)
 if enable_actions == 1 then
@@ -143,7 +144,6 @@ if voice_control == 1 then
       ext.shell("FSLabs Copilot\\voice\\FSLCopilot_voice.exe",EXT_KILL)
    end
 end
-
 
 do
    local play_V1 = play_V1
