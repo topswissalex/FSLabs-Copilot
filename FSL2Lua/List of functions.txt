@@ -1,0 +1,69 @@
+
+<controlname>(position)
+
+- If the control is a pushbutton, call the control without the 'position' parameter
+  to press the button.
+
+- If the control is a switch with fixed positions ("off", "on" etc.), specify the
+  position parameter as a string. The available positions for each control are 
+  listed in 'List of controls.txt'
+
+- Alternatively, each position has its own function and calling that function is the
+  same as calling the base control function with a position argument. The names of 
+  such functions are <controlname>_<position>.
+ 
+  YOU NEED TO USE THESE FUNCTIONS WHEN BINDING CONTROLS TO KEYS OR BUTTONS.
+
+  Example: 
+
+  FSL.OVHD_EXTLT_Land_R_Switch_RETR() is the same as FSL.OVHD_EXTLT_Land_R_Switch("RETR")
+
+
+- If the control is a rotary knob with no fixed positions (like the various cockpit 
+  lighting knobs), specify the position parameter as a percentage of the knob's range.
+  It has to be a number, not a string.
+
+------------------------------------------------------------------------------------
+
+<controlname>:isDown()
+
+Returns true if a the control is a button that is in a depressed state.
+
+------------------------------------------------------------------------------------
+
+<controlname>:isLit()	
+
+Returns true if the control has a light Lvar associated with it and the light is on.
+Unfortunately, the square overhead-style buttons don't have such Lvars.
+
+------------------------------------------------------------------------------------
+
+<controlname>:getPosn()
+
+If the control is a switch with fixed positions ("off", "on" etc.), this method returns
+the position as a string. The available positions for each control are listed in 
+'List of controls.txt'
+
+-------------------------------------------------------------------------------------
+
+<controlname>:getVar()
+
+Returns the Lvar of the control.
+
+------------------------------------------------------------------------------------- 
+
+These two methods are to be used with controls that are button guards:
+
+<controlname>:open()
+
+<controlname>:close()
+
+-------------------------------------------------------------------------------------
+
+These two methods are to be used with the FCU rotary knobs
+
+<controlname>:push()
+
+<controlname>:pull()
+
+-------------------------------------------------------------------------------------
