@@ -600,6 +600,13 @@ function buttBind(joyLetter,butt,func,cond,downup)
    event.button(joyLetter,butt,1 or downup,funcName)
 end
 
+function Sequence(seq)
+   repeat sleep() until not ipc.get("seqExecuting")
+   ipc.set("seqExecuting",1)
+   seq()
+   ipc.set("seqExecuting",nil)
+end
+
 -- Main ---------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------
 
