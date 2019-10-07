@@ -81,6 +81,7 @@ function afterTakeoffSequence()
    until readLvar("FSLA320_slat_l_1") == 0
    sleep(plusminus(2000,0.5))
    FSL.PED_SPD_BRK_LEVER("RET")
+   if FSL.OVHD_Vent_Extract_Button:isDown() then FSL.OVHD_Vent_Extract_Button() end
 end
 
 function tenThousandDepSequence()
@@ -196,7 +197,7 @@ function afterLandingSequence(startApu)
 
    if ipc.get("afterLandingSequence") == 1 then FSL:startTheApu()
    else ipc.set("startApu",0) end
-
+   if FSL.OVHD_GPWS_LDG_FLAP_3_Button:isDown() then FSL.OVHD_GPWS_LDG_FLAP_3_Button() end
 end
 
 function init()
