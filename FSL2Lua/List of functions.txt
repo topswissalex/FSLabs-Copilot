@@ -48,7 +48,7 @@ the position as a string. The available positions for each control are listed in
 
 <controlname>:getVar()
 
-Returns the Lvar of the control.
+Returns the Lvar value of the control.
 
 ------------------------------------------------------------------------------------- 
 
@@ -65,5 +65,3 @@ These two methods are to be used with the FCU rotary knobs
 <controlname>:push()
 
 <controlname>:pull()
-
--------------------------------------------------------------------------------------
