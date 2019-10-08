@@ -31,6 +31,7 @@ function taxiSequence()
    FSL.PED_ECP_TO_CONFIG_Button()
    FSL.PED_ECP_TO_CONFIG_Button()
    FSL.PED_ECP_TO_CONFIG_Button()
+   test
 end
 
 function takeoffSequenceTrigger()
